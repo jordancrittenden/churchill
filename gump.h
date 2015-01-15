@@ -13,11 +13,21 @@ extern "C" {
 #define DLL_API __declspec(dllimport)
 #endif
 
-struct BubbaSearchContext {
+struct TreeNode {
+	int ximin, ximax, yimin, yimax;
+	TreeNode* tr;
+	TreeNode* tl;
+	TreeNode* bl;
+	TreeNode* br;
+	Point* top20;
+};
+
+struct GumpSearchContext {
 	int32_t N;
 	Point* xSort;
 	Point* ySort;
 	Point* rankSort;
+	TreeNode* root;
 };
 
 SearchContext* __stdcall DLL_API create(const Point* points_begin, const Point* points_end);
