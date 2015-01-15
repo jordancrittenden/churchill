@@ -14,19 +14,24 @@ extern "C" {
 #endif
 
 struct TreeNode {
-	int ximin, ximax, yimin, yimax;
+	int ximin, ximax;
+	int yimin, yimax;
+	Rect* rect;
 	TreeNode* tr;
 	TreeNode* tl;
 	TreeNode* bl;
 	TreeNode* br;
-	Point* top20;
+	Point* my20;
+	int myN;
+	Point* child20;
+	int childN;
 };
 
 struct GumpSearchContext {
 	int32_t N;
-	Point* xSort;
-	Point* ySort;
-	Point* rankSort;
+	Point* xsort;
+	Point* ysort;
+	Point* ranksort;
 	TreeNode* root;
 };
 

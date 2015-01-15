@@ -7,20 +7,20 @@
 
 // DEBUGGING --------------------------------------------------------------------------------------
 
-void printContext(GumpSearchContext* context) {
+void printContext(GumpSearchContext* sc) {
 	int i = 0;
-	printf("\n%d Points\n", context->N);
-	printf("xSort:\n");
-	for (i = 0; i < context->N; i++) {
-		printf("%d, %d, %f, %f\n", context->xSort[i].id, context->xSort[i].rank, context->xSort[i].x, context->xSort[i].y);
+	printf("\n%d Points\n", sc->N);
+	printf("xsort:\n");
+	for (i = 0; i < sc->N; i++) {
+		printf("%d, %d, %f, %f\n", sc->xsort[i].id, sc->xsort[i].rank, sc->xsort[i].x, sc->xsort[i].y);
 	}
-	printf("ySort:\n");
-	for (i = 0; i < context->N; i++) {
-		printf("%d, %d, %f, %f\n", context->ySort[i].id, context->ySort[i].rank, context->ySort[i].x, context->ySort[i].y);
+	printf("ysort:\n");
+	for (i = 0; i < sc->N; i++) {
+		printf("%d, %d, %f, %f\n", sc->ysort[i].id, sc->ysort[i].rank, sc->ysort[i].x, sc->ysort[i].y);
 	}
-	printf("rankSort:\n");
-	for (i = 0; i < context->N; i++) {
-		printf("%d, %d, %f, %f\n", context->rankSort[i].id, context->rankSort[i].rank, context->rankSort[i].x, context->rankSort[i].y);
+	printf("ranksort:\n");
+	for (i = 0; i < sc->N; i++) {
+		printf("%d, %d, %f, %f\n", sc->ranksort[i].id, sc->ranksort[i].rank, sc->ranksort[i].x, sc->ranksort[i].y);
 	}
 }
 
@@ -66,6 +66,15 @@ inline bool isHitX(const Rect* r, Point* p) {
 
 inline bool isHitY(const Rect* r, Point* p) {
 	return p->y >= r->ly && p->y <= r->hy;
+}
+
+inline bool isRectInside(Rect* r1, Rect* r2) {
+	return r2->lx >= r1->lx && r2->lx <= r1->hx && r2->ly >= r1->ly && r2->ly <= r1->hy &&
+	       r2->hx >= r1->lx && r2->hx <= r1->hx && r2->hy >= r1->ly && r2->hy <= r1->hy;
+}
+
+inline bool isRectOverlap(Rect* r1, Rect* r2) {
+	return r1->lx < r2->hx && r1->hx > r2->lx && r1->ly < r2->hy && r1->hy > r2->ly;
 }
 
 int bsearch(Point p[], bool xOrY, bool minOrMax, float v, int imin, int imax) {
@@ -180,16 +189,15 @@ int32_t findHits(const Rect* rect, Point* in, int n, Point* out, int count, bool
 // SEARCH IMPLEMENTATIONS -------------------------------------------------------------------------
 
 // baseline search - search full list of points, sorted by rank increasing
-int32_t searchBaseline(SearchContext* sc, const Rect rect, const int32_t count, Point* out_points) {
+int32_t searchBaseline(GumpSearchContext* sc, const Rect rect, const int32_t count, Point* out_points) {
 	// FILE *f = fopen("rects.csv", "a");
 	// fprintf(f, "%f,%f,%f,%f\n", rect.lx, rect.hx, rect.ly, rect.hy);
 	// fclose(f);
 
-	GumpSearchContext* context = (GumpSearchContext*)sc;
 	int32_t n = 0;
 	int i = 0;
-	while (n < count && i < context->N) {
-		Point p = context->rankSort[i];
+	while (n < count && i < sc->N) {
+		Point p = sc->ranksort[i];
 		if (isHit(&rect, &p)) {
 			out_points[n] = p;
 			n++;
@@ -202,53 +210,151 @@ int32_t searchBaseline(SearchContext* sc, const Rect rect, const int32_t count, 
 
 
 // binary search - narrow search to points in x range, y range, and check smaller set
-int32_t searchBinary(SearchContext* sc, const Rect rect, const int32_t count, Point* out_points) {
-	GumpSearchContext* context = (GumpSearchContext*)sc;
+int32_t searchBinary(GumpSearchContext* sc, const Rect rect, const int32_t count, Point* out_points) {
 	int32_t n = 0;
-	int xidxl = bsearch(context->xSort, true, true, rect.lx, 0, context->N);
-	int xidxr = bsearch(context->xSort, true, false, rect.hx, 0, context->N);
-	int yidxl = bsearch(context->ySort, false, true, rect.ly, 0, context->N);
-	int yidxr = bsearch(context->ySort, false, false, rect.hy, 0, context->N);
+	int xidxl = bsearch(sc->xsort, true, true, rect.lx, 0, sc->N);
+	int xidxr = bsearch(sc->xsort, true, false, rect.hx, 0, sc->N);
+	int yidxl = bsearch(sc->ysort, false, true, rect.ly, 0, sc->N);
+	int yidxr = bsearch(sc->ysort, false, false, rect.hy, 0, sc->N);
 	int nx = xidxr - xidxl + 1;
 	int ny = yidxr - yidxl + 1;
 
 	if (nx == 0 || ny == 0) return 0;
 
-	float ratio = (float)(nx < ny ? nx : ny) / (float)context->N;
+	float ratio = (float)(nx < ny ? nx : ny) / (float)sc->N;
 	if (ratio > .01f) return searchBaseline(sc, rect, count, out_points);
 
-	if (nx < ny) return findHits(&rect, &context->xSort[xidxl], nx, out_points, count, isHitY);
-	else return findHits(&rect, &context->ySort[yidxl], ny, out_points, count, isHitX);
+	if (nx < ny) return findHits(&rect, &sc->xsort[xidxl], nx, out_points, count, isHitY);
+	else return findHits(&rect, &sc->ysort[yidxl], ny, out_points, count, isHitX);
 }
 
+#define RANK_MAX 100000000
 
 // tree search - build quadtree and narrow use precomputed solutions as starting point
-int32_t searchTree(SearchContext* sc, const Rect rect, const int32_t count, Point* out_points) {
+void treeHits(GumpSearchContext* sc, TreeNode* node, const Rect rect) {
+	// if this node is fully contained within the rect, return this nodes hits
+	if (isRectInside((Rect*)(&rect), node->rect)) {
+		//printf("\nRect is fully contained in [%f,%f,%f,%f]", node->rect->lx, node->rect->hx, node->rect->ly, node->rect->hy);
+		memcpy(node->child20, node->my20, node->myN * sizeof(Point));
+		node->childN = node->myN;
+		return;
+	}
 
+	// if this node doesn't overlap the rect at all, return null
+	if (!isRectOverlap((Rect*)(&rect), node->rect)) {
+		//printf("\nRect does not overlap [%f,%f,%f,%f]", node->rect->lx, node->rect->hx, node->rect->ly, node->rect->hy);
+		node->childN = 0;
+		return;
+	}
+
+	// recurse on the subtrees
+	if (node->tr) treeHits(sc, node->tr, rect);
+	if (node->tl) treeHits(sc, node->tl, rect);
+	if (node->bl) treeHits(sc, node->bl, rect);
+	if (node->br) treeHits(sc, node->br, rect);
+
+	// merge results of children
+	int tri = 0, tli = 0, bli = 0, bri = 0;
+	int trr = RANK_MAX;
+	int tlr = RANK_MAX;
+	int blr = RANK_MAX;
+	int brr = RANK_MAX;
+	while (node->childN < 20) {
+		if (node->tr && tri < node->tr->childN) trr = node->tr->child20[tri].rank; else trr = RANK_MAX;
+		if (node->tl && tli < node->tl->childN) tlr = node->tl->child20[tli].rank; else tlr = RANK_MAX;
+		if (node->bl && bli < node->bl->childN) blr = node->bl->child20[bli].rank; else blr = RANK_MAX;
+		if (node->br && bri < node->br->childN) brr = node->br->child20[bri].rank; else brr = RANK_MAX;
+
+		if (trr == RANK_MAX && tlr == RANK_MAX && blr == RANK_MAX && brr == RANK_MAX) break;
+
+		if      (trr < tlr && trr < blr && trr < brr) { node->child20[node->childN] = node->tr->child20[tri]; tri++; }
+		else if (tlr < trr && tlr < blr && tlr < brr) { node->child20[node->childN] = node->tl->child20[tri]; tli++; }
+		else if (blr < trr && blr < tlr && blr < brr) { node->child20[node->childN] = node->bl->child20[tri]; bli++; }
+		else if (brr < trr && brr < tlr && brr < blr) { node->child20[node->childN] = node->br->child20[tri]; bri++; }
+
+		node->childN++;
+	}
+}
+
+int32_t searchTree(GumpSearchContext* sc, const Rect rect, const int32_t count, Point* out_points) {
+	// find x and y index bounds
+	int xidxl = bsearch(sc->xsort, true, true, rect.lx, 0, sc->N);
+	int xidxr = bsearch(sc->xsort, true, false, rect.hx, 0, sc->N);
+	int yidxl = bsearch(sc->ysort, false, true, rect.ly, 0, sc->N);
+	int yidxr = bsearch(sc->ysort, false, false, rect.hy, 0, sc->N);
+
+	// find hits in tree
+	treeHits(sc, sc->root, rect);
+
+	// find the leftover hits - the ones outside of the treenodes
+
+	return sc->root->childN;
 }
 
 
 
 // DLL IMPLEMENTATION -----------------------------------------------------------------------------
+int nodes = 0;
 
-TreeNode* buildNode(Point* xSort, int ximin, int ximax, Point* ySort, int yimin, int yimax) {
+TreeNode* buildNode(GumpSearchContext* sc, int ximin, int ximax, int yimin, int yimax) {
+	nodes++;
 	TreeNode* node = (TreeNode*)malloc(sizeof(TreeNode));
-	// compute top 20 in this region
+	node->ximin = ximin;
+	node->ximax = ximax;
+	node->yimin = yimin;
+	node->yimax = yimax;
+	node->tr = NULL;
+	node->tl = NULL;
+	node->bl = NULL;
+	node->br = NULL;
 
-	// build out children
+	// compute top 20 in this region
 	int nx = ximax - ximin + 1;
 	int ny = yimax - yimin + 1;
-	if (nx < 100 || ny < 100) return node;
+	const struct Rect r = {
+		.lx = sc->xsort[ximin].x,
+		.ly = sc->ysort[yimin].y,
+		.hx = sc->xsort[ximax].x,
+		.hy = sc->ysort[yimax].y
+	};
+	node->rect = (Rect*)malloc(sizeof(Rect));
+	node->rect->lx = r.lx;
+	node->rect->ly = r.ly;
+	node->rect->hx = r.hx;
+	node->rect->hy = r.hy;
+	node->my20 = (Point*)calloc(20, sizeof(Point));
+	node->myN = searchBinary(sc, r, 20, node->my20);
+	node->child20 = (Point*)calloc(20, sizeof(Point));
+	node->childN = 0;
+
+	// stop recursion if fewer than 100 points in x or y array
+	if (nx < 10000 || ny < 10000) return node;
 
 	int ximed = (ximin + ximax) / 2;
 	int yimed = (yimin + yimax) / 2;
-	while (ximed < ximax && xSort[ximed] == xSort[ximed+1]) ximed++; // don't break on same x val
-	while (yimed < yimax && ySort[yimed] == xSort[yimed+1]) yimed++; // don't break on same y val
+	// don't split on same x or y val
+	float curx = sc->xsort[ximed].x;
+	float nextx = sc->xsort[ximed+1].x;
+	while (ximed < ximax && curx == nextx) {
+		ximed++;
+		curx = sc->xsort[ximed].x;
+		nextx = sc->xsort[ximed+1].x;
+	}
+	float cury = sc->ysort[yimed].y;
+	float nexty = sc->ysort[yimed+1].y;
+	while (yimed < yimax && cury == nexty) {
+		yimed++;
+		cury = sc->ysort[yimed].y;
+		nexty = sc->ysort[yimed+1].y;
+	}
 
-	node->tr = buildNode(xSort, ximed + 1, xmax, ySort, yimed + 1, yimax);
-	node->tl = buildNode(xSort, ximin,    ximed, ySort, yimed + 1, yimax);
-	node->bl = buildNode(xSort, ximin,    ximed, ySort, yimin,     yimed);
-	node->br = buildNode(xSort, ximed + 1, xmax, ySort, yimin,     yimed);
+	// build out children
+	node->tr = buildNode(sc, ximed + 1, ximax, yimed + 1, yimax);
+	node->tl = buildNode(sc, ximin,     ximed, yimed + 1, yimax);
+	node->bl = buildNode(sc, ximin,     ximed, yimin,     yimed);
+	node->br = buildNode(sc, ximed + 1, ximax, yimin,     yimed);
+
+	return node;
 }
 
 void freeNode(TreeNode* node) {
@@ -256,43 +362,47 @@ void freeNode(TreeNode* node) {
 	if (node->tl) freeNode(node->tl);
 	if (node->bl) freeNode(node->bl);
 	if (node->br) freeNode(node->br);
-	if (node->tr) free(node->tr);
-	if (node->tl) free(node->tl);
-	if (node->bl) free(node->bl);
-	if (node->br) free(node->br);
-	free(node->top20);
+	free(node->my20);
+	free(node->child20);
+	free(node->rect);
+	free(node);
 }
 
 __stdcall SearchContext* create(const Point* points_begin, const Point* points_end) {
-	GumpSearchContext* context = (GumpSearchContext*)malloc(sizeof(GumpSearchContext));
-	context->N = points_end - points_begin;
-	context->xSort = (Point*)calloc(context->N, sizeof(Point));
-	context->ySort = (Point*)calloc(context->N, sizeof(Point));
-	context->rankSort = (Point*)calloc(context->N, sizeof(Point));
-	memcpy(context->xSort, points_begin, context->N * sizeof(Point));
-	memcpy(context->ySort, points_begin, context->N * sizeof(Point));
-	memcpy(context->rankSort, points_begin, context->N * sizeof(Point));
-	qsort(context->xSort, context->N, sizeof(Point), xCompare);
-	qsort(context->ySort, context->N, sizeof(Point), yCompare);
-	qsort(context->rankSort, context->N, sizeof(Point), rankCompare);
-	return (SearchContext*)context;
+	GumpSearchContext* sc = (GumpSearchContext*)malloc(sizeof(GumpSearchContext));
+	sc->N = points_end - points_begin;
+	sc->xsort = (Point*)calloc(sc->N, sizeof(Point));
+	sc->ysort = (Point*)calloc(sc->N, sizeof(Point));
+	sc->ranksort = (Point*)calloc(sc->N, sizeof(Point));
+	memcpy(sc->xsort, points_begin, sc->N * sizeof(Point));
+	memcpy(sc->ysort, points_begin, sc->N * sizeof(Point));
+	memcpy(sc->ranksort, points_begin, sc->N * sizeof(Point));
+	qsort(sc->xsort, sc->N, sizeof(Point), xCompare);
+	qsort(sc->ysort, sc->N, sizeof(Point), yCompare);
+	qsort(sc->ranksort, sc->N, sizeof(Point), rankCompare);
+	sc->root = buildNode(sc, 0, sc->N-1, 0, sc->N-1);
+
+	printf("\nBuilt %d nodes", nodes);
 
 	// FILE *f = fopen("points.csv", "w");
-	// for (int i = 0; i < context->N; i++) {
-	// 	fprintf(f, "%d,%f,%f\n", context->rankSort[i].rank, context->rankSort[i].x, context->rankSort[i].y);
+	// for (int i = 0; i < sc->N; i++) {
+	// 	fprintf(f, "%d,%f,%f\n", sc->ranksort[i].rank, sc->ranksort[i].x, sc->ranksort[i].y);
 	// }
 	// fclose(f);
+
+	return (SearchContext*)sc;
 }
 
 __stdcall int32_t search(SearchContext* sc, const Rect rect, const int32_t count, Point* out_points) {
-	return searchBinary(sc, rect, count, out_points);
+	GumpSearchContext* context = (GumpSearchContext*)sc;
+	return searchTree(context, rect, count, out_points);
 }
 
 __stdcall SearchContext* destroy(SearchContext* sc) {
 	GumpSearchContext* context = (GumpSearchContext*)sc;
-	free(context->xSort);
-	free(context->ySort);
-	free(context->rankSort);
+	free(context->xsort);
+	free(context->ysort);
+	free(context->ranksort);
 	freeNode(context->root);
 	return NULL;
 }
