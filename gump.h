@@ -25,6 +25,8 @@ struct TreeNode {
 	int myN;
 	Point* child20;
 	int childN;
+	int childxmin, childxmax;
+	int childymin, childymax;
 };
 
 struct GumpSearchContext {

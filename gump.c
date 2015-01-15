@@ -282,13 +282,24 @@ int32_t searchTree(GumpSearchContext* sc, const Rect rect, const int32_t count, 
 	int xidxr = bsearch(sc->xsort, true, false, rect.hx, 0, sc->N);
 	int yidxl = bsearch(sc->ysort, false, true, rect.ly, 0, sc->N);
 	int yidxr = bsearch(sc->ysort, false, false, rect.hy, 0, sc->N);
+	int nx = xidxr - xidxl + 1;
+	int ny = yidxr - yidxl + 1;
 
-	// find hits in tree
-	treeHits(sc, sc->root, rect);
+	if (nx == 0 || ny == 0) return 0;
 
-	// find the leftover hits - the ones outside of the treenodes
+	float ratio = (float)(nx < ny ? nx : ny) / (float)sc->N;
+	if (ratio > .5f) return searchBaseline(sc, rect, count, out_points);
+	else if (ratio < .01f) {
+		if (nx < ny) return findHits(&rect, &sc->xsort[xidxl], nx, out_points, count, isHitY);
+		else return findHits(&rect, &sc->ysort[yidxl], ny, out_points, count, isHitX);
+	} else {
+		// find hits in tree
+		treeHits(sc, sc->root, rect);
 
-	return sc->root->childN;
+		// find the leftover hits - the ones outside of the treenodes
+
+		return sc->root->childN;
+	}
 }
 
 
