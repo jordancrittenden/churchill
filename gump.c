@@ -68,6 +68,16 @@ inline bool isHitY(const Rect* r, Point* p) {
 	return p->y >= r->ly && p->y <= r->hy;
 }
 
+int _rankmax = 0;
+
+inline bool isHitXMinRank(const Rect* r, Point* p) {
+	return p->rank < _rankmax && p->x >= r->lx && p->x <= r->hx;
+}
+
+inline bool isHitYMinRank(const Rect* r, Point* p) {
+	return p->rank < _rankmax && p->y >= r->ly && p->y <= r->hy;
+}
+
 inline bool isRectInside(Rect* r1, Rect* r2) {
 	return r2->lx >= r1->lx && r2->lx <= r1->hx && r2->ly >= r1->ly && r2->ly <= r1->hy &&
 	       r2->hx >= r1->lx && r2->hx <= r1->hx && r2->hy >= r1->ly && r2->hy <= r1->hy;
@@ -234,17 +244,41 @@ int32_t searchBinary(GumpSearchContext* sc, const Rect rect, const int32_t count
 void treeHits(GumpSearchContext* sc, TreeNode* node, const Rect rect) {
 	// if this node is fully contained within the rect, return this nodes hits
 	if (isRectInside((Rect*)(&rect), node->rect)) {
-		//printf("\nRect is fully contained in [%f,%f,%f,%f]", node->rect->lx, node->rect->hx, node->rect->ly, node->rect->hy);
+		printf("Node rect [%f,%f,%f,%f] (%d,%d,%d,%d) fully contained\n",
+			node->rect->lx, node->rect->hx, node->rect->ly, node->rect->hy,
+			node->ximin, node->ximax, node->yimin, node->yimax
+		);
+		if (DEBUG) printf("Returning %d hits to parent\n", node->myN);
+		if (DEBUG) printPoints(node->my20, node->myN);
 		memcpy(node->child20, node->my20, node->myN * sizeof(Point));
 		node->childN = node->myN;
+		if (sc->treeximin == -1 || node->ximin < sc->treeximin) sc->treeximin = node->ximin;
+		if (sc->treeximax == -1 || node->ximax > sc->treeximax) {sc->treeximax = node->ximax; printf("Updated treeximax to %d\n", sc->treeximax);}
+		if (sc->treeyimin == -1 || node->yimin < sc->treeyimin) sc->treeyimin = node->yimin;
+		if (sc->treeyimax == -1 || node->yimax > sc->treeyimax) sc->treeyimax = node->yimax;
 		return;
 	}
 
 	// if this node doesn't overlap the rect at all, return null
 	if (!isRectOverlap((Rect*)(&rect), node->rect)) {
-		//printf("\nRect does not overlap [%f,%f,%f,%f]", node->rect->lx, node->rect->hx, node->rect->ly, node->rect->hy);
+		if (DEBUG) printf("Node rect [%f,%f,%f,%f] (%d,%d,%d,%d) does not overlap\n",
+			node->rect->lx, node->rect->hx, node->rect->ly, node->rect->hy,
+			node->ximin, node->ximax, node->yimin, node->yimax
+		);
 		node->childN = 0;
 		return;
+	}
+
+	if (isRectInside(node->rect, (Rect*)(&rect))) {
+		if (DEBUG) printf("Node rect [%f,%f,%f,%f] (%d,%d,%d,%d) full contain\n",
+			node->rect->lx, node->rect->hx, node->rect->ly, node->rect->hy,
+			node->ximin, node->ximax, node->yimin, node->yimax
+		);
+	} else {
+		if (DEBUG) printf("Node rect [%f,%f,%f,%f] (%d,%d,%d,%d) partial overlap\n",
+			node->rect->lx, node->rect->hx, node->rect->ly, node->rect->hy,
+			node->ximin, node->ximax, node->yimin, node->yimax
+		);
 	}
 
 	// recurse on the subtrees
@@ -252,6 +286,13 @@ void treeHits(GumpSearchContext* sc, TreeNode* node, const Rect rect) {
 	if (node->tl) treeHits(sc, node->tl, rect);
 	if (node->bl) treeHits(sc, node->bl, rect);
 	if (node->br) treeHits(sc, node->br, rect);
+
+	if (DEBUG) printf("Merging %d points from tr, %d points from tl, %d points from bl, %d points from br\n",
+		node->tr ? node->tr->childN : 0,
+		node->tl ? node->tl->childN : 0,
+		node->bl ? node->bl->childN : 0,
+		node->br ? node->br->childN : 0
+	);
 
 	// merge results of children
 	int tri = 0, tli = 0, bli = 0, bri = 0;
@@ -268,9 +309,9 @@ void treeHits(GumpSearchContext* sc, TreeNode* node, const Rect rect) {
 		if (trr == RANK_MAX && tlr == RANK_MAX && blr == RANK_MAX && brr == RANK_MAX) break;
 
 		if      (trr < tlr && trr < blr && trr < brr) { node->child20[node->childN] = node->tr->child20[tri]; tri++; }
-		else if (tlr < trr && tlr < blr && tlr < brr) { node->child20[node->childN] = node->tl->child20[tri]; tli++; }
-		else if (blr < trr && blr < tlr && blr < brr) { node->child20[node->childN] = node->bl->child20[tri]; bli++; }
-		else if (brr < trr && brr < tlr && brr < blr) { node->child20[node->childN] = node->br->child20[tri]; bri++; }
+		else if (tlr < trr && tlr < blr && tlr < brr) { node->child20[node->childN] = node->tl->child20[tli]; tli++; }
+		else if (blr < trr && blr < tlr && blr < brr) { node->child20[node->childN] = node->bl->child20[bli]; bli++; }
+		else if (brr < trr && brr < tlr && brr < blr) { node->child20[node->childN] = node->br->child20[bri]; bri++; }
 
 		node->childN++;
 	}
@@ -278,27 +319,92 @@ void treeHits(GumpSearchContext* sc, TreeNode* node, const Rect rect) {
 
 int32_t searchTree(GumpSearchContext* sc, const Rect rect, const int32_t count, Point* out_points) {
 	// find x and y index bounds
-	int xidxl = bsearch(sc->xsort, true, true, rect.lx, 0, sc->N);
-	int xidxr = bsearch(sc->xsort, true, false, rect.hx, 0, sc->N);
-	int yidxl = bsearch(sc->ysort, false, true, rect.ly, 0, sc->N);
-	int yidxr = bsearch(sc->ysort, false, false, rect.hy, 0, sc->N);
-	int nx = xidxr - xidxl + 1;
-	int ny = yidxr - yidxl + 1;
+	int ximin = bsearch(sc->xsort, true, true, rect.lx, 0, sc->N);
+	int ximax = bsearch(sc->xsort, true, false, rect.hx, 0, sc->N);
+	int yimin = bsearch(sc->ysort, false, true, rect.ly, 0, sc->N);
+	int yimax = bsearch(sc->ysort, false, false, rect.hy, 0, sc->N);
+	int nx = ximax - ximin + 1;
+	int ny = yimax - yimin + 1;
 
 	if (nx == 0 || ny == 0) return 0;
 
 	float ratio = (float)(nx < ny ? nx : ny) / (float)sc->N;
-	if (ratio > .5f) return searchBaseline(sc, rect, count, out_points);
+	if (ratio > .3f) return searchBaseline(sc, rect, count, out_points);
 	else if (ratio < .01f) {
-		if (nx < ny) return findHits(&rect, &sc->xsort[xidxl], nx, out_points, count, isHitY);
-		else return findHits(&rect, &sc->ysort[yidxl], ny, out_points, count, isHitX);
+		if (nx < ny) return findHits(&rect, &sc->xsort[ximin], nx, out_points, count, isHitY);
+		else return findHits(&rect, &sc->ysort[yimin], ny, out_points, count, isHitX);
 	} else {
+		printf("\n");
+		printf("(%d,%d,%d,%d) ", ximin, ximax, yimin, yimax);
+		printRect(rect);
+
+		sc->treeximin = -1;
+		sc->treeximax = -1;
+		sc->treeyimin = -1;
+		sc->treeyimax = -1;
+
 		// find hits in tree
 		treeHits(sc, sc->root, rect);
+		int N = sc->root->childN;
+		memcpy(out_points, sc->root->child20, N * sizeof(Point));
+
+		printf("Found %d hits corresponding to rect [%f,%f,%f,%f] (%d,%d,%d,%d)\n", N, sc->xsort[sc->treeximin].x, sc->xsort[sc->treeximax].x, sc->ysort[sc->treeyimin].y, sc->ysort[sc->treeyimax].y, sc->treeximin, sc->treeximax, sc->treeyimin, sc->treeyimax);
+		if (DEBUG) printPoints(sc->root->child20, sc->root->childN);
 
 		// find the leftover hits - the ones outside of the treenodes
+		_rankmax = N > 0 ? out_points[N-1].rank : RANK_MAX;
+		const struct Rect lr = {
+			.lx = sc->xsort[ximin].x,
+			.ly = sc->ysort[yimin].y,
+			.hx = sc->xsort[sc->treeximin-1].x,
+			.hy = sc->ysort[yimax].y
+		};
+		int ln = findHits(&rect, &sc->xsort[ximin], sc->treeximin - ximin, sc->lbox, count, isHitYMinRank);
+		const struct Rect rr = {
+			.lx = sc->xsort[sc->treeximax+1].x,
+			.ly = sc->ysort[yimin].y,
+			.hx = sc->xsort[ximax].x,
+			.hy = sc->ysort[yimax].y
+		};
+		int rn = findHits(&rect, &sc->xsort[sc->treeximax+1], ximax - sc->treeximax + 2, sc->rbox, count, isHitYMinRank);
+		const struct Rect tr = {
+			.lx = sc->xsort[sc->treeximin].x,
+			.ly = sc->ysort[sc->treeyimax+1].y,
+			.hx = sc->xsort[sc->treeximax].x,
+			.hy = sc->ysort[yimax].y
+		};
+		int tn = findHits(&rect, &sc->ysort[sc->treeyimax+1], yimax - sc->treeyimax + 2, sc->tbox, count, isHitXMinRank);
+		const struct Rect br = {
+			.lx = sc->xsort[sc->treeximin].x,
+			.ly = sc->ysort[yimin].y,
+			.hx = sc->xsort[sc->treeximax].x,
+			.hy = sc->ysort[sc->treeyimin-1].y
+		};
+		int bn = findHits(&rect, &sc->ysort[yimin], sc->treeyimin - yimin, sc->bbox, count, isHitXMinRank);
 
-		return sc->root->childN;
+		printf("Found %d left [%f,%f,%f,%f] (%d,%d,%d,%d)\n",
+			ln,
+			lr.lx, lr.hx, lr.ly, lr.hy,
+			ximin, sc->treeximin-1, yimin, yimax
+		);
+		printf("Found %d left [%f,%f,%f,%f] (%d,%d,%d,%d)\n",
+			rn,
+			rr.lx, rr.hx, rr.ly, rr.hy,
+			sc->treeximax+1, ximax, yimin, yimax
+		);
+		printf("Found %d left [%f,%f,%f,%f] (%d,%d,%d,%d)\n",
+			tn,
+			tr.lx, tr.hx, tr.ly, tr.hy,
+			sc->treeximin, sc->treeximax, sc->treeyimax+1, yimax
+		);
+		printf("Found %d left [%f,%f,%f,%f] (%d,%d,%d,%d)\n",
+			bn,
+			br.lx, br.hx, br.ly, br.hy,
+			sc->treeximin, sc->treeximax, yimin, sc->treeyimin-1
+		);
+
+		getc(stdin);
+		return N;
 	}
 }
 
@@ -328,6 +434,7 @@ TreeNode* buildNode(GumpSearchContext* sc, int ximin, int ximax, int yimin, int 
 		.hx = sc->xsort[ximax].x,
 		.hy = sc->ysort[yimax].y
 	};
+
 	node->rect = (Rect*)malloc(sizeof(Rect));
 	node->rect->lx = r.lx;
 	node->rect->ly = r.ly;
@@ -335,6 +442,10 @@ TreeNode* buildNode(GumpSearchContext* sc, int ximin, int ximax, int yimin, int 
 	node->rect->hy = r.hy;
 	node->my20 = (Point*)calloc(20, sizeof(Point));
 	node->myN = searchBinary(sc, r, 20, node->my20);
+
+	printf("Found top %d points in rect (%d,%d,%d,%d) ", node->myN, ximin, ximax, yimin, yimax);
+	printRect(r);
+
 	node->child20 = (Point*)calloc(20, sizeof(Point));
 	node->childN = 0;
 
@@ -392,14 +503,18 @@ __stdcall SearchContext* create(const Point* points_begin, const Point* points_e
 	qsort(sc->ysort, sc->N, sizeof(Point), yCompare);
 	qsort(sc->ranksort, sc->N, sizeof(Point), rankCompare);
 	sc->root = buildNode(sc, 0, sc->N-1, 0, sc->N-1);
+	sc->lbox = (Point*)calloc(20, sizeof(Point));
+	sc->rbox = (Point*)calloc(20, sizeof(Point));
+	sc->tbox = (Point*)calloc(20, sizeof(Point));
+	sc->bbox = (Point*)calloc(20, sizeof(Point));
 
 	printf("\nBuilt %d nodes", nodes);
 
-	// FILE *f = fopen("points.csv", "w");
-	// for (int i = 0; i < sc->N; i++) {
-	// 	fprintf(f, "%d,%f,%f\n", sc->ranksort[i].rank, sc->ranksort[i].x, sc->ranksort[i].y);
-	// }
-	// fclose(f);
+	FILE *f = fopen("points.csv", "w");
+	for (int i = 0; i < sc->N; i++) {
+		fprintf(f, "%d,%f,%f\n", sc->ranksort[i].rank, sc->ranksort[i].x, sc->ranksort[i].y);
+	}
+	fclose(f);
 
 	return (SearchContext*)sc;
 }
