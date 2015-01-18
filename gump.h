@@ -33,6 +33,7 @@ struct GumpSearchContext {
 	Point* ysort;
 	Point* ranksort;
 	TreeNode* root;
+	Rect *lrect, *rrect, *trect, *brect;
 	Point *lbox, *rbox, *tbox, *bbox;
 	int treeximin, treeximax;
 	int treeyimin, treeyimax;

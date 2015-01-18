@@ -317,55 +317,49 @@ int32_t searchTree(GumpSearchContext* sc, const Rect rect, const int32_t count, 
 		// find hits in tree
 		treeHits(sc, sc->root, rect);
 
+		// TODO results incorrect if no fully contained node found
+
 		// find the leftover hits - the ones outside of the treenodes
 		_rankmax = sc->root->childN > 0 ? sc->root->child20[sc->root->childN-1].rank : RANK_MAX;
-		const struct Rect lrect = {
-			.lx = sc->xsort[ximin].x,
-			.ly = sc->ysort[yimin].y,
-			.hx = sc->xsort[sc->treeximin-1].x,
-			.hy = sc->ysort[yimax].y
-		};
+		sc->lrect->lx = sc->xsort[ximin].x,
+		sc->lrect->ly = sc->ysort[yimin].y,
+		sc->lrect->hx = sc->xsort[sc->treeximin-1].x,
+		sc->lrect->hy = sc->ysort[yimax].y;
 		int lnx = sc->treeximin - ximin;
 		int lny = yimax - yimin + 1;
 		int ln = 0;
-		if (lnx < lny) ln = findHits(&lrect, &sc->xsort[ximin], lnx, sc->lbox, count, isHitYMinRank);
-		else ln = findHits(&lrect, &sc->ysort[yimin], lny, sc->lbox, count, isHitXMinRank);
+		if (lnx < lny) ln = findHits(sc->lrect, &sc->xsort[ximin], lnx, sc->lbox, count, isHitYMinRank);
+		else ln = findHits(sc->lrect, &sc->ysort[yimin], lny, sc->lbox, count, isHitXMinRank);
 
-		const struct Rect rrect = {
-			.lx = sc->xsort[sc->treeximax+1].x,
-			.ly = sc->ysort[yimin].y,
-			.hx = sc->xsort[ximax].x,
-			.hy = sc->ysort[yimax].y
-		};
+		sc->rrect->lx = sc->xsort[sc->treeximax+1].x,
+		sc->rrect->ly = sc->ysort[yimin].y,
+		sc->rrect->hx = sc->xsort[ximax].x,
+		sc->rrect->hy = sc->ysort[yimax].y;
 		int rnx = ximax - sc->treeximax + 2;
 		int rny = yimax - yimin + 1;
 		int rn = 0;
-		if (rnx < rny) rn = findHits(&rrect, &sc->xsort[sc->treeximax+1], rnx, sc->rbox, count, isHitYMinRank);
-		else rn = findHits(&lrect, &sc->ysort[yimin], rny, sc->rbox, count, isHitYMinRank);
+		if (rnx < rny) rn = findHits(sc->rrect, &sc->xsort[sc->treeximax+1], rnx, sc->rbox, count, isHitYMinRank);
+		else rn = findHits(sc->rrect, &sc->ysort[yimin], rny, sc->rbox, count, isHitYMinRank);
 
-		const struct Rect trect = {
-			.lx = sc->xsort[sc->treeximin].x,
-			.ly = sc->ysort[sc->treeyimax+1].y,
-			.hx = sc->xsort[sc->treeximax].x,
-			.hy = sc->ysort[yimax].y
-		};
+		sc->trect->lx = sc->xsort[sc->treeximin].x,
+		sc->trect->ly = sc->ysort[sc->treeyimax+1].y,
+		sc->trect->hx = sc->xsort[sc->treeximax].x,
+		sc->trect->hy = sc->ysort[yimax].y;
 		int tnx = sc->treeximax - sc->treeximin + 1;
 		int tny = yimax - sc->treeyimax + 2;
 		int tn = 0;
-		if (tnx < tny) tn = findHits(&trect, &sc->xsort[sc->treeximin], tnx, sc->tbox, count, isHitYMinRank);
-		else tn = findHits(&trect, &sc->ysort[sc->treeyimax+1], tny, sc->tbox, count, isHitXMinRank);
+		if (tnx < tny) tn = findHits(sc->trect, &sc->xsort[sc->treeximin], tnx, sc->tbox, count, isHitYMinRank);
+		else tn = findHits(sc->trect, &sc->ysort[sc->treeyimax+1], tny, sc->tbox, count, isHitXMinRank);
 
-		const struct Rect brect = {
-			.lx = sc->xsort[sc->treeximin].x,
-			.ly = sc->ysort[yimin].y,
-			.hx = sc->xsort[sc->treeximax].x,
-			.hy = sc->ysort[sc->treeyimin-1].y
-		};
+		sc->brect->lx = sc->xsort[sc->treeximin].x,
+		sc->brect->ly = sc->ysort[yimin].y,
+		sc->brect->hx = sc->xsort[sc->treeximax].x,
+		sc->brect->hy = sc->ysort[sc->treeyimin-1].y;
 		int bnx = sc->treeximax - sc->treeximin + 1;
 		int bny = sc->treeyimin - yimin;
 		int bn = 0;
-		if (bnx < bny) bn = findHits(&rrect, &sc->xsort[sc->treeximin], bnx, sc->bbox, count, isHitYMinRank);
-		else bn = findHits(&brect, &sc->ysort[yimin], bny, sc->bbox, count, isHitXMinRank);
+		if (bnx < bny) bn = findHits(sc->brect, &sc->xsort[sc->treeximin], bnx, sc->bbox, count, isHitYMinRank);
+		else bn = findHits(sc->brect, &sc->ysort[yimin], bny, sc->bbox, count, isHitXMinRank);
 
 		int N = 0;
 		int ni = 0, li = 0, ri = 0, ti = 0, bi = 0;
@@ -483,6 +477,10 @@ __stdcall SearchContext* create(const Point* points_begin, const Point* points_e
 	qsort(sc->ysort, sc->N, sizeof(Point), yCompare);
 	qsort(sc->ranksort, sc->N, sizeof(Point), rankCompare);
 	sc->root = buildNode(sc, 0, sc->N-1, 0, sc->N-1);
+	sc->lrect = (Rect*)malloc(sizeof(Rect));
+	sc->rrect = (Rect*)malloc(sizeof(Rect));
+	sc->trect = (Rect*)malloc(sizeof(Rect));
+	sc->brect = (Rect*)malloc(sizeof(Rect));
 	sc->lbox = (Point*)calloc(20, sizeof(Point));
 	sc->rbox = (Point*)calloc(20, sizeof(Point));
 	sc->tbox = (Point*)calloc(20, sizeof(Point));
@@ -501,7 +499,7 @@ __stdcall SearchContext* create(const Point* points_begin, const Point* points_e
 
 __stdcall int32_t search(SearchContext* sc, const Rect rect, const int32_t count, Point* out_points) {
 	GumpSearchContext* context = (GumpSearchContext*)sc;
-	return searchBinary(context, rect, count, out_points);
+	return searchTree(context, rect, count, out_points);
 }
 
 __stdcall SearchContext* destroy(SearchContext* sc) {
@@ -510,6 +508,10 @@ __stdcall SearchContext* destroy(SearchContext* sc) {
 	free(context->ysort);
 	free(context->ranksort);
 	freeNode(context->root);
+	free(context->lrect);
+	free(context->rrect);
+	free(context->trect);
+	free(context->brect);
 	free(context->lbox);
 	free(context->rbox);
 	free(context->tbox);
