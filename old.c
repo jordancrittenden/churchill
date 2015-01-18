@@ -17,6 +17,25 @@ void printContext(GumpSearchContext* sc) {
 	}
 }
 
+int _rankmax = 0;
+
+inline bool isHitXMinRank(const Rect* r, Point* p) {
+	return p->rank < _rankmax && p->x >= r->lx && p->x <= r->hx;
+}
+
+inline bool isHitYMinRank(const Rect* r, Point* p) {
+	return p->rank < _rankmax && p->y >= r->ly && p->y <= r->hy;
+}
+
+inline bool isRectInside(Rect* r1, Rect* r2) {
+	return r2->lx >= r1->lx && r2->lx <= r1->hx && r2->ly >= r1->ly && r2->ly <= r1->hy &&
+	       r2->hx >= r1->lx && r2->hx <= r1->hx && r2->hy >= r1->ly && r2->hy <= r1->hy;
+}
+
+inline bool isRectOverlap(Rect* r1, Rect* r2) {
+	return r1->lx < r2->hx && r1->hx > r2->lx && r1->ly < r2->hy && r1->hy > r2->ly;
+}
+
 int intersect(Point p1[], Point p2[], int n1, int n2, int max, Point* out) {
 	int i = 0, j = 0, n = 0;
 	qsort(p1, n1, sizeof(Point), rankCompare);

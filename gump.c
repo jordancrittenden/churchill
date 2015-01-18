@@ -3,9 +3,9 @@
 #include <string.h>
 #include "gump.h"
 
-#define DEBUG 0
 #define MINRANGE 1000000
 #define MAXRESLEN 20
+#define MULTFACTOR 10000
 
 // DEBUGGING --------------------------------------------------------------------------------------
 
@@ -51,25 +51,6 @@ inline bool isHitX(const Rect* r, Point* p) {
 
 inline bool isHitY(const Rect* r, Point* p) {
 	return p->y >= r->ly && p->y <= r->hy;
-}
-
-int _rankmax = 0;
-
-inline bool isHitXMinRank(const Rect* r, Point* p) {
-	return p->rank < _rankmax && p->x >= r->lx && p->x <= r->hx;
-}
-
-inline bool isHitYMinRank(const Rect* r, Point* p) {
-	return p->rank < _rankmax && p->y >= r->ly && p->y <= r->hy;
-}
-
-inline bool isRectInside(Rect* r1, Rect* r2) {
-	return r2->lx >= r1->lx && r2->lx <= r1->hx && r2->ly >= r1->ly && r2->ly <= r1->hy &&
-	       r2->hx >= r1->lx && r2->hx <= r1->hx && r2->hy >= r1->ly && r2->hy <= r1->hy;
-}
-
-inline bool isRectOverlap(Rect* r1, Rect* r2) {
-	return r1->lx < r2->hx && r1->hx > r2->lx && r1->ly < r2->hy && r1->hy > r2->ly;
 }
 
 int bsearch(Point p[], bool xOrY, bool minOrMax, float v, int imin, int imax) {
@@ -208,27 +189,25 @@ int32_t rangeHits(GumpSearchContext* sc, const Rect rect, Range* range, int left
 
 	int hits = range->leaf ?
 		findHitsS(&rect, range->ranksort, range->r - range->l + 1, out_points, count, isHit) : 
-		findHitsS(&rect, range->ranksorttop, 10*MAXRESLEN, out_points, count, isHit);
+		findHitsS(&rect, range->ranksorttop, MULTFACTOR*MAXRESLEN, out_points, count, isHit);
 	if (!range->leaf && hits < count) {
 		printf("FUCK\n");
 		hits = findHitsU(&rect, &sc->xsort[left], right - left + 1, out_points, count, isHit);
-	} else printf("COOL\n");
+	}
 	return hits;
 }
 
 int32_t searchRankBinary(GumpSearchContext* sc, const Rect rect, const int32_t count, Point* out_points) {
-	int32_t n = 0;
 	int xidxl = bsearch(sc->xsort, true, true, rect.lx, 0, sc->N);
 	int xidxr = bsearch(sc->xsort, true, false, rect.hx, 0, sc->N);
-	// int yidxl = bsearch(sc->ysort, false, true, rect.ly, 0, sc->N);
-	// int yidxr = bsearch(sc->ysort, false, false, rect.hy, 0, sc->N);
+	int yidxl = bsearch(sc->ysort, false, true, rect.ly, 0, sc->N);
+	int yidxr = bsearch(sc->ysort, false, false, rect.hy, 0, sc->N);
 	int nx = xidxr - xidxl + 1;
-	//int ny = yidxr - yidxl + 1;
+	int ny = yidxr - yidxl + 1;
 
-	if (nx == 0);// || ny == 0) return 0;
-	return rangeHits(sc, rect, sc->xroot, xidxl, xidxr, count, out_points);
-	// if (nx < ny) return rangeHits(sc, rect, sc->xroot, xidxl, xidxr, count, out_points);
-	// else return rangeHits(sc, rect, sc->yroot, yidxl, yidxr, count, out_points);
+	if (nx == 0 || ny == 0) return 0;
+	if (nx < ny) return rangeHits(sc, rect, sc->xroot, xidxl, xidxr, count, out_points);
+	else return rangeHits(sc, rect, sc->yroot, yidxl, yidxr, count, out_points);
 }
 
 
@@ -264,8 +243,8 @@ Range* buildRange(GumpSearchContext* sc, Point* sort, int l, int r, float (*sel)
 	}
 
 	range->leaf = false;
-	range->ranksorttop = (Point*)calloc(10*MAXRESLEN, sizeof(Point));
-	memcpy(range->ranksorttop, range->ranksort, 10*MAXRESLEN * sizeof(Point));
+	range->ranksorttop = (Point*)calloc(MULTFACTOR*MAXRESLEN, sizeof(Point));
+	memcpy(range->ranksorttop, range->ranksort, MULTFACTOR*MAXRESLEN * sizeof(Point));
 	free(range->ranksort);
 	range->ranksort = NULL;
 
@@ -319,19 +298,19 @@ __stdcall SearchContext* create(const Point* points_begin, const Point* points_e
 	GumpSearchContext* sc = (GumpSearchContext*)malloc(sizeof(GumpSearchContext));
 	sc->N = points_end - points_begin;
 	sc->xsort = (Point*)calloc(sc->N, sizeof(Point));
-	//sc->ysort = (Point*)calloc(sc->N, sizeof(Point));
+	sc->ysort = (Point*)calloc(sc->N, sizeof(Point));
 	sc->ranksort = (Point*)calloc(sc->N, sizeof(Point));
 	memcpy(sc->xsort, points_begin, sc->N * sizeof(Point));
-	//memcpy(sc->ysort, points_begin, sc->N * sizeof(Point));
+	memcpy(sc->ysort, points_begin, sc->N * sizeof(Point));
 	memcpy(sc->ranksort, points_begin, sc->N * sizeof(Point));
 	qsort(sc->xsort, sc->N, sizeof(Point), xCompare);
-	//qsort(sc->ysort, sc->N, sizeof(Point), yCompare);
+	qsort(sc->ysort, sc->N, sizeof(Point), yCompare);
 	qsort(sc->ranksort, sc->N, sizeof(Point), rankCompare);
 
 	sc->xroot = buildRange(sc, sc->xsort, 0, sc->N-1, selx, false);
-	//sc->yroot = buildRange(sc, sc->ysort, 0, sc->N-1, sely, false);
+	sc->yroot = buildRange(sc, sc->ysort, 0, sc->N-1, sely, false);
 
-	//free(sc->ranksort);
+	free(sc->ranksort);
 
 	printf("\nBuilt %d ranges\n", ranges);
 
@@ -340,21 +319,14 @@ __stdcall SearchContext* create(const Point* points_begin, const Point* points_e
 
 __stdcall int32_t search(SearchContext* sc, const Rect rect, const int32_t count, Point* out_points) {
 	GumpSearchContext* context = (GumpSearchContext*)sc;
-	// int baseN = searchBaseline(context, rect, count, out_points);
-	// printf("Base\n");
-	// printPoints(out_points, baseN);
-	int treeN = searchRankBinary(context, rect, count, out_points);
-	// printf("Tree\n");
-	// printPoints(out_points, treeN);
-	return treeN;
+	return searchRankBinary(context, rect, count, out_points);
 }
 
 __stdcall SearchContext* destroy(SearchContext* sc) {
 	GumpSearchContext* context = (GumpSearchContext*)sc;
 	free(context->xsort);
-	//free(context->ysort);
-	free(context->ranksort);
+	free(context->ysort);
 	freeRange(context->xroot);
-	//freeRange(context->yroot);
+	freeRange(context->yroot);
 	return NULL;
 }

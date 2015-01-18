@@ -13,22 +13,6 @@ extern "C" {
 #define DLL_API __declspec(dllimport)
 #endif
 
-struct TreeNode {
-	int ximin, ximax;
-	int yimin, yimax;
-	Rect* rect;
-	TreeNode* tr;
-	TreeNode* tl;
-	TreeNode* bl;
-	TreeNode* br;
-	Point* myPoints;
-	int myN;
-	Point* childPoints;
-	int childN;
-	Point* my5xPoints;
-	int my5xN;
-};
-
 struct Range {
 	int l, r;
 	bool leaf;
