@@ -244,12 +244,6 @@ int32_t searchBinary(GumpSearchContext* sc, const Rect rect, const int32_t count
 void treeHits(GumpSearchContext* sc, TreeNode* node, const Rect rect) {
 	// if this node is fully contained within the rect, return this nodes hits
 	if (isRectInside((Rect*)(&rect), node->rect)) {
-		if (DEBUG) printf("Node rect [%f,%f,%f,%f] (%d,%d,%d,%d) fully contained\n",
-			node->rect->lx, node->rect->hx, node->rect->ly, node->rect->hy,
-			node->ximin, node->ximax, node->yimin, node->yimax
-		);
-		if (DEBUG > 1) printf("Returning %d hits to parent\n", node->myN);
-		if (DEBUG > 1) printPoints(node->my20, node->myN);
 		memcpy(node->child20, node->my20, node->myN * sizeof(Point));
 		node->childN = node->myN;
 		if (sc->treeximin == -1 || node->ximin < sc->treeximin) sc->treeximin = node->ximin;
@@ -261,24 +255,8 @@ void treeHits(GumpSearchContext* sc, TreeNode* node, const Rect rect) {
 
 	// if this node doesn't overlap the rect at all, return null
 	if (!isRectOverlap((Rect*)(&rect), node->rect)) {
-		if (DEBUG) printf("Node rect [%f,%f,%f,%f] (%d,%d,%d,%d) does not overlap\n",
-			node->rect->lx, node->rect->hx, node->rect->ly, node->rect->hy,
-			node->ximin, node->ximax, node->yimin, node->yimax
-		);
 		node->childN = 0;
 		return;
-	}
-
-	if (isRectInside(node->rect, (Rect*)(&rect))) {
-		if (DEBUG) printf("Node rect [%f,%f,%f,%f] (%d,%d,%d,%d) full contain\n",
-			node->rect->lx, node->rect->hx, node->rect->ly, node->rect->hy,
-			node->ximin, node->ximax, node->yimin, node->yimax
-		);
-	} else {
-		if (DEBUG) printf("Node rect [%f,%f,%f,%f] (%d,%d,%d,%d) partial overlap\n",
-			node->rect->lx, node->rect->hx, node->rect->ly, node->rect->hy,
-			node->ximin, node->ximax, node->yimin, node->yimax
-		);
 	}
 
 	// recurse on the subtrees
@@ -339,9 +317,6 @@ int32_t searchTree(GumpSearchContext* sc, const Rect rect, const int32_t count, 
 		// find hits in tree
 		treeHits(sc, sc->root, rect);
 
-		// printf("Found %d hits corresponding to rect [%f,%f,%f,%f] (%d,%d,%d,%d)\n", sc->root->childN, sc->xsort[sc->treeximin].x, sc->xsort[sc->treeximax].x, sc->ysort[sc->treeyimin].y, sc->ysort[sc->treeyimax].y, sc->treeximin, sc->treeximax, sc->treeyimin, sc->treeyimax);
-		// printPoints(sc->root->child20, sc->root->childN);
-
 		// find the leftover hits - the ones outside of the treenodes
 		_rankmax = sc->root->childN > 0 ? sc->root->child20[sc->root->childN-1].rank : RANK_MAX;
 		const struct Rect lrect = {
@@ -372,33 +347,6 @@ int32_t searchTree(GumpSearchContext* sc, const Rect rect, const int32_t count, 
 			.hy = sc->ysort[sc->treeyimin-1].y
 		};
 		int bn = findHits(&brect, &sc->ysort[yimin], sc->treeyimin - yimin, sc->bbox, count, isHitXMinRank);
-
-		if (DEBUG) {
-			printf("Found %d left [%f,%f,%f,%f] (%d,%d,%d,%d)\n",
-				ln,
-				lrect.lx, lrect.hx, lrect.ly, lrect.hy,
-				ximin, sc->treeximin-1, yimin, yimax
-			);
-			printPoints(sc->lbox, ln);
-			printf("Found %d right [%f,%f,%f,%f] (%d,%d,%d,%d)\n",
-				rn,
-				rrect.lx, rrect.hx, rrect.ly, rrect.hy,
-				sc->treeximax+1, ximax, yimin, yimax
-			);
-			printPoints(sc->rbox, rn);
-			printf("Found %d top [%f,%f,%f,%f] (%d,%d,%d,%d)\n",
-				tn,
-				trect.lx, trect.hx, trect.ly, trect.hy,
-				sc->treeximin, sc->treeximax, sc->treeyimax+1, yimax
-			);
-			printPoints(sc->tbox, tn);
-			printf("Found %d bottom [%f,%f,%f,%f] (%d,%d,%d,%d)\n",
-				bn,
-				brect.lx, brect.hx, brect.ly, brect.hy,
-				sc->treeximin, sc->treeximax, yimin, sc->treeyimin-1
-			);
-			printPoints(sc->bbox, bn);
-		}
 
 		int N = 0;
 		int ni = 0, li = 0, ri = 0, ti = 0, bi = 0;
@@ -521,7 +469,7 @@ __stdcall SearchContext* create(const Point* points_begin, const Point* points_e
 	sc->tbox = (Point*)calloc(20, sizeof(Point));
 	sc->bbox = (Point*)calloc(20, sizeof(Point));
 
-	if (DEBUG) printf("\nBuilt %d nodes\n", nodes);
+	printf("\nBuilt %d nodes\n", nodes);
 
 	// FILE *f = fopen("points.csv", "w");
 	// for (int i = 0; i < sc->N; i++) {
@@ -534,21 +482,7 @@ __stdcall SearchContext* create(const Point* points_begin, const Point* points_e
 
 __stdcall int32_t search(SearchContext* sc, const Rect rect, const int32_t count, Point* out_points) {
 	GumpSearchContext* context = (GumpSearchContext*)sc;
-	const struct Rect r = {
-		.lx = -838.290405f,
-		.ly = -618.542297f,
-		.hx = -838.051147f,
-		.hy = -537.392761f
-	};
-	printf("Query rect - "); printRect(r);
-	// int baseN = searchBaseline(context, r, count, out_points);
-	// printf("Base (%d points)\n", baseN);
-	// printPoints(out_points, baseN);
-	_rankmax = 0;
-	int treeN = searchTree(context, rect, count, out_points);
-	// printf("Tree (%d points)\n", treeN);
-	// printPoints(out_points, treeN);
-	return treeN;
+	return searchTree(context, rect, count, out_points);
 }
 
 __stdcall SearchContext* destroy(SearchContext* sc) {
@@ -557,5 +491,9 @@ __stdcall SearchContext* destroy(SearchContext* sc) {
 	free(context->ysort);
 	free(context->ranksort);
 	freeNode(context->root);
+	free(context->lbox);
+	free(context->rbox);
+	free(context->tbox);
+	free(context->bbox);
 	return NULL;
 }
