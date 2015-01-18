@@ -25,6 +25,8 @@ struct TreeNode {
 	int myN;
 	Point* childPoints;
 	int childN;
+	Point* my5xPoints;
+	int my5xN;
 };
 
 struct GumpSearchContext {

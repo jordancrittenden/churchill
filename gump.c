@@ -4,7 +4,7 @@
 #include "gump.h"
 
 #define DEBUG 0
-#define MINBOX 50000
+#define MINBOX 100000 //50000
 #define RANK_MAX 100000000
 #define MAXRESLEN 20
 
@@ -127,7 +127,7 @@ int intersect(Point p1[], Point p2[], int n1, int n2, int max, Point* out) {
 	return n;
 }
 
-int32_t findHits(const Rect* rect, Point* in, int n, Point* out, int count, bool (*hitcheck)(const Rect* r, Point* p)) {
+int32_t findHitsU(const Rect* rect, Point* in, int n, Point* out, int count, bool (*hitcheck)(const Rect* r, Point* p)) {
 	int i = 0;
 	int hits = 0;
 
@@ -191,24 +191,28 @@ int32_t findHits(const Rect* rect, Point* in, int n, Point* out, int count, bool
 	return hits;
 }
 
+int32_t findHitsS(const Rect* rect, Point* in, int n, Point* out, int count, bool (*hitcheck)(const Rect* r, Point* p)) {
+	int32_t k = 0;
+	int i = 0;
+	while (k < count && i < n) {
+		Point p = in[i];
+		if (hitcheck(rect, &p)) {
+			out[k] = p;
+			k++;
+		}
+		i++;
+	}
+
+	return k;
+}
+
 
 
 // SEARCH IMPLEMENTATIONS -------------------------------------------------------------------------
 
 // baseline search - search full list of points, sorted by rank increasing
 int32_t searchBaseline(GumpSearchContext* sc, const Rect rect, const int32_t count, Point* out_points) {
-	int32_t n = 0;
-	int i = 0;
-	while (n < count && i < sc->N) {
-		Point p = sc->ranksort[i];
-		if (isHit(&rect, &p)) {
-			out_points[n] = p;
-			n++;
-		}
-		i++;
-	}
-
-	return n;
+	return findHitsS(&rect, sc->ranksort, sc->N, out_points, count, isHit);
 }
 
 
@@ -227,12 +231,12 @@ int32_t searchBinary(GumpSearchContext* sc, const Rect rect, const int32_t count
 	float ratio = (float)(nx < ny ? nx : ny) / (float)sc->N;
 	if (ratio > .01f) return searchBaseline(sc, rect, count, out_points);
 
-	if (nx < ny) return findHits(&rect, &sc->xsort[xidxl], nx, out_points, count, isHitY);
-	else return findHits(&rect, &sc->ysort[yidxl], ny, out_points, count, isHitX);
+	if (nx < ny) return findHitsU(&rect, &sc->xsort[xidxl], nx, out_points, count, isHitY);
+	else return findHitsU(&rect, &sc->ysort[yidxl], ny, out_points, count, isHitX);
 }
 
 // tree search - build quadtree and narrow use precomputed solutions as starting point
-void treeHits(GumpSearchContext* sc, TreeNode* node, const Rect rect) {
+void treeHitsA(GumpSearchContext* sc, TreeNode* node, const Rect rect) {
 	// if this node is fully contained within the rect, return this nodes hits
 	if (isRectInside((Rect*)(&rect), node->rect)) {
 		memcpy(node->childPoints, node->myPoints, node->myN * sizeof(Point));
@@ -251,10 +255,10 @@ void treeHits(GumpSearchContext* sc, TreeNode* node, const Rect rect) {
 	}
 
 	// recurse on the subtrees
-	if (node->tr) treeHits(sc, node->tr, rect);
-	if (node->tl) treeHits(sc, node->tl, rect);
-	if (node->bl) treeHits(sc, node->bl, rect);
-	if (node->br) treeHits(sc, node->br, rect);
+	if (node->tr) treeHitsA(sc, node->tr, rect);
+	if (node->tl) treeHitsA(sc, node->tl, rect);
+	if (node->bl) treeHitsA(sc, node->bl, rect);
+	if (node->br) treeHitsA(sc, node->br, rect);
 
 	// merge results of children
 	int tri = 0, tli = 0, bli = 0, bri = 0;
@@ -280,7 +284,7 @@ void treeHits(GumpSearchContext* sc, TreeNode* node, const Rect rect) {
 	}
 }
 
-int32_t searchTree(GumpSearchContext* sc, const Rect rect, const int32_t count, Point* out_points) {
+int32_t searchTreeA(GumpSearchContext* sc, const Rect rect, const int32_t count, Point* out_points) {
 	// find x and y index bounds
 	int ximin = bsearch(sc->xsort, true, true, rect.lx, 0, sc->N);
 	int ximax = bsearch(sc->xsort, true, false, rect.hx, 0, sc->N);
@@ -295,8 +299,8 @@ int32_t searchTree(GumpSearchContext* sc, const Rect rect, const int32_t count, 
 	float ratio = (float)smallside / (float)sc->N;
 	if (ratio > .1f) return searchBaseline(sc, rect, count, out_points);
 	else if (smallside < 2*MINBOX) {
-		if (nx < ny) return findHits(&rect, &sc->xsort[ximin], nx, out_points, count, isHitY);
-		else return findHits(&rect, &sc->ysort[yimin], ny, out_points, count, isHitX);
+		if (nx < ny) return findHitsU(&rect, &sc->xsort[ximin], nx, out_points, count, isHitY);
+		else return findHitsU(&rect, &sc->ysort[yimin], ny, out_points, count, isHitX);
 	} else {
 		sc->treeximin = -1;
 		sc->treeximax = -1;
@@ -304,7 +308,7 @@ int32_t searchTree(GumpSearchContext* sc, const Rect rect, const int32_t count, 
 		sc->treeyimax = -1;
 
 		// find hits in tree
-		treeHits(sc, sc->root, rect);
+		treeHitsA(sc, sc->root, rect);
 
 		// TODO results incorrect if no fully contained node found
 
@@ -317,8 +321,8 @@ int32_t searchTree(GumpSearchContext* sc, const Rect rect, const int32_t count, 
 		int lnx = sc->treeximin - ximin;
 		int lny = yimax - yimin + 1;
 		int ln = 0;
-		if (lnx < lny) ln = findHits(sc->lrect, &sc->xsort[ximin], lnx, sc->lbox, count, isHitYMinRank);
-		else ln = findHits(sc->lrect, &sc->ysort[yimin], lny, sc->lbox, count, isHitXMinRank);
+		if (lnx < lny) ln = findHitsU(sc->lrect, &sc->xsort[ximin], lnx, sc->lbox, count, isHitYMinRank);
+		else ln = findHitsU(sc->lrect, &sc->ysort[yimin], lny, sc->lbox, count, isHitXMinRank);
 
 		sc->rrect->lx = sc->xsort[sc->treeximax+1].x,
 		sc->rrect->ly = sc->ysort[yimin].y,
@@ -327,8 +331,8 @@ int32_t searchTree(GumpSearchContext* sc, const Rect rect, const int32_t count, 
 		int rnx = ximax - sc->treeximax + 2;
 		int rny = yimax - yimin + 1;
 		int rn = 0;
-		if (rnx < rny) rn = findHits(sc->rrect, &sc->xsort[sc->treeximax+1], rnx, sc->rbox, count, isHitYMinRank);
-		else rn = findHits(sc->rrect, &sc->ysort[yimin], rny, sc->rbox, count, isHitYMinRank);
+		if (rnx < rny) rn = findHitsU(sc->rrect, &sc->xsort[sc->treeximax+1], rnx, sc->rbox, count, isHitYMinRank);
+		else rn = findHitsU(sc->rrect, &sc->ysort[yimin], rny, sc->rbox, count, isHitYMinRank);
 
 		sc->trect->lx = sc->xsort[sc->treeximin].x,
 		sc->trect->ly = sc->ysort[sc->treeyimax+1].y,
@@ -337,8 +341,8 @@ int32_t searchTree(GumpSearchContext* sc, const Rect rect, const int32_t count, 
 		int tnx = sc->treeximax - sc->treeximin + 1;
 		int tny = yimax - sc->treeyimax + 2;
 		int tn = 0;
-		if (tnx < tny) tn = findHits(sc->trect, &sc->xsort[sc->treeximin], tnx, sc->tbox, count, isHitYMinRank);
-		else tn = findHits(sc->trect, &sc->ysort[sc->treeyimax+1], tny, sc->tbox, count, isHitXMinRank);
+		if (tnx < tny) tn = findHitsU(sc->trect, &sc->xsort[sc->treeximin], tnx, sc->tbox, count, isHitYMinRank);
+		else tn = findHitsU(sc->trect, &sc->ysort[sc->treeyimax+1], tny, sc->tbox, count, isHitXMinRank);
 
 		sc->brect->lx = sc->xsort[sc->treeximin].x,
 		sc->brect->ly = sc->ysort[yimin].y,
@@ -347,8 +351,8 @@ int32_t searchTree(GumpSearchContext* sc, const Rect rect, const int32_t count, 
 		int bnx = sc->treeximax - sc->treeximin + 1;
 		int bny = sc->treeyimin - yimin;
 		int bn = 0;
-		if (bnx < bny) bn = findHits(sc->brect, &sc->xsort[sc->treeximin], bnx, sc->bbox, count, isHitYMinRank);
-		else bn = findHits(sc->brect, &sc->ysort[yimin], bny, sc->bbox, count, isHitXMinRank);
+		if (bnx < bny) bn = findHitsU(sc->brect, &sc->xsort[sc->treeximin], bnx, sc->bbox, count, isHitYMinRank);
+		else bn = findHitsU(sc->brect, &sc->ysort[yimin], bny, sc->bbox, count, isHitXMinRank);
 
 		int N = 0;
 		int ni = 0, li = 0, ri = 0, ti = 0, bi = 0;
@@ -373,6 +377,52 @@ int32_t searchTree(GumpSearchContext* sc, const Rect rect, const int32_t count, 
 
 		return N;
 	}
+}
+
+int32_t treeHitsB(GumpSearchContext* sc, TreeNode* node, const Rect rect, int32_t count, Point* out_points) {
+	// check immediate children
+	if (isRectInside(node->tr->rect, (Rect*)(&rect))) return treeHitsB(sc, node->tr, rect, count, out_points);
+	else if (isRectInside(node->tl->rect, (Rect*)(&rect))) return treeHitsB(sc, node->tl, rect, count, out_points);
+	else if (isRectInside(node->bl->rect, (Rect*)(&rect))) return treeHitsB(sc, node->bl, rect, count, out_points);
+	else if (isRectInside(node->br->rect, (Rect*)(&rect))) return treeHitsB(sc, node->br, rect, count, out_points);
+
+	// if not contained in any immediate children, check self
+	if (isRectInside(node->rect, (Rect*)(&rect))) {
+		int hits = findHitsS(&rect, node->my5xPoints, node->my5xN, out_points, count, isHit);
+		if (hits < count && node->my5xN > count) {
+			int nx = node->ximax - node->ximin + 1;
+			int ny = node->yimax - node->yimin + 1;
+			if (nx < ny) return findHitsU(&rect, &sc->xsort[node->ximin], nx, out_points, count, isHit);
+			else return findHitsU(&rect, &sc->ysort[node->yimin], ny, out_points, count, isHit);
+		} else return hits;
+	}
+
+	return searchBaseline(sc, rect, count, out_points);
+}
+
+int32_t searchTreeB(GumpSearchContext* sc, const Rect rect, const int32_t count, Point* out_points) {
+	// find x and y index bounds
+	int ximin = bsearch(sc->xsort, true, true, rect.lx, 0, sc->N);
+	int ximax = bsearch(sc->xsort, true, false, rect.hx, 0, sc->N);
+	int yimin = bsearch(sc->ysort, false, true, rect.ly, 0, sc->N);
+	int yimax = bsearch(sc->ysort, false, false, rect.hy, 0, sc->N);
+	int nx = ximax - ximin + 1;
+	int ny = yimax - yimin + 1;
+
+	// printf("Query rect [%f,%f,%f,%f] (%d,%d,%d,%d)\n",
+	// 	rect.lx, rect.hx, rect.ly, rect.hy,
+	// 	ximin, ximax, yimin, yimax
+	// );
+
+	if (nx == 0 || ny == 0) return 0;
+
+	int smallside = nx < ny ? nx : ny;
+	float ratio = (float)smallside / (float)sc->N;
+	if (ratio > .1f) return searchBaseline(sc, rect, count, out_points);
+	else if (smallside < 2*MINBOX) {
+		if (nx < ny) return findHitsU(&rect, &sc->xsort[ximin], nx, out_points, count, isHitY);
+		else return findHitsU(&rect, &sc->ysort[yimin], ny, out_points, count, isHitX);
+	} else return treeHitsB(sc, sc->root, rect, count, out_points);
 }
 
 
@@ -407,10 +457,12 @@ TreeNode* buildNode(GumpSearchContext* sc, int ximin, int ximax, int yimin, int 
 	node->rect->ly = r.ly;
 	node->rect->hx = r.hx;
 	node->rect->hy = r.hy;
-	node->myPoints = (Point*)calloc(MAXRESLEN, sizeof(Point));
-	node->myN = searchBinary(sc, r, MAXRESLEN, node->myPoints);
-	node->childPoints = (Point*)calloc(MAXRESLEN, sizeof(Point));
-	node->childN = 0;
+	//node->myPoints = (Point*)calloc(MAXRESLEN, sizeof(Point));
+	//node->myN = searchBinary(sc, r, MAXRESLEN, node->myPoints);
+	//node->childPoints = (Point*)calloc(MAXRESLEN, sizeof(Point));
+	//node->childN = 0;
+	node->my5xPoints = (Point*)calloc(5*MAXRESLEN, sizeof(Point));
+	node->my5xN = searchBinary(sc, r, 5*MAXRESLEN, node->my5xPoints);
 
 	// stop recursion if fewer than 100 points in x or y array
 	if (nx < MINBOX || ny < MINBOX) return node;
@@ -447,8 +499,9 @@ void freeNode(TreeNode* node) {
 	if (node->tl) freeNode(node->tl);
 	if (node->bl) freeNode(node->bl);
 	if (node->br) freeNode(node->br);
-	free(node->myPoints);
-	free(node->childPoints);
+	//free(node->myPoints);
+	//free(node->childPoints);
+	free(node->my5xPoints);
 	free(node->rect);
 	free(node);
 }
@@ -488,7 +541,8 @@ __stdcall SearchContext* create(const Point* points_begin, const Point* points_e
 
 __stdcall int32_t search(SearchContext* sc, const Rect rect, const int32_t count, Point* out_points) {
 	GumpSearchContext* context = (GumpSearchContext*)sc;
-	return searchTree(context, rect, count, out_points);
+	int baseN = searchBaseline(context, rect, count, out_points);
+	return searchTreeB(context, rect, count, out_points);
 }
 
 __stdcall SearchContext* destroy(SearchContext* sc) {
