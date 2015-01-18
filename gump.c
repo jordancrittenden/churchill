@@ -4,7 +4,7 @@
 #include "gump.h"
 
 #define DEBUG 0
-#define MINBOX 1000000
+#define MINBOX 100000
 #define RANK_MAX 100000000
 
 // DEBUGGING --------------------------------------------------------------------------------------
@@ -287,13 +287,6 @@ void treeHits(GumpSearchContext* sc, TreeNode* node, const Rect rect) {
 	if (node->bl) treeHits(sc, node->bl, rect);
 	if (node->br) treeHits(sc, node->br, rect);
 
-	if (DEBUG) printf("Merging %d points from tr, %d points from tl, %d points from bl, %d points from br\n",
-		node->tr ? node->tr->childN : 0,
-		node->tl ? node->tl->childN : 0,
-		node->bl ? node->bl->childN : 0,
-		node->br ? node->br->childN : 0
-	);
-
 	// merge results of children
 	int tri = 0, tli = 0, bli = 0, bri = 0;
 	int trr = RANK_MAX;
@@ -334,7 +327,7 @@ int32_t searchTree(GumpSearchContext* sc, const Rect rect, const int32_t count, 
 	int smallside = nx < ny ? nx : ny;
 	float ratio = (float)smallside / (float)sc->N;
 	if (ratio > .3f) return searchBaseline(sc, rect, count, out_points);
-	else if (smallside < MINBOX) {
+	else if (smallside < 2*MINBOX) {
 		if (nx < ny) return findHits(&rect, &sc->xsort[ximin], nx, out_points, count, isHitY);
 		else return findHits(&rect, &sc->ysort[yimin], ny, out_points, count, isHitX);
 	} else {
@@ -542,13 +535,13 @@ __stdcall SearchContext* create(const Point* points_begin, const Point* points_e
 __stdcall int32_t search(SearchContext* sc, const Rect rect, const int32_t count, Point* out_points) {
 	GumpSearchContext* context = (GumpSearchContext*)sc;
 	const struct Rect r = {
-		.lx = -838.928894f,
-		.ly = -510.346130f,
-		.hx = -837.968689f,
-		.hy = -438.919495f
+		.lx = -838.290405f,
+		.ly = -618.542297f,
+		.hx = -838.051147f,
+		.hy = -537.392761f
 	};
-	//printf("Query rect - "); printRect(rect);
-	// int baseN = searchBaseline(context, rect, count, out_points);
+	printf("Query rect - "); printRect(r);
+	// int baseN = searchBaseline(context, r, count, out_points);
 	// printf("Base (%d points)\n", baseN);
 	// printPoints(out_points, baseN);
 	_rankmax = 0;
