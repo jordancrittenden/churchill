@@ -21,9 +21,9 @@ struct TreeNode {
 	TreeNode* tl;
 	TreeNode* bl;
 	TreeNode* br;
-	Point* my20;
+	Point* myPoints;
 	int myN;
-	Point* child20;
+	Point* childPoints;
 	int childN;
 };
 
