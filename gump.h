@@ -29,16 +29,23 @@ struct TreeNode {
 	int my5xN;
 };
 
+struct Range {
+	int l, r;
+	bool leaf;
+	Point* ranksort;
+	Point* ranksorttop;
+	Range* left;
+	Range* right;
+	Range* mid;
+};
+
 struct GumpSearchContext {
 	int32_t N;
 	Point* xsort;
 	Point* ysort;
 	Point* ranksort;
-	TreeNode* root;
-	Rect *lrect, *rrect, *trect, *brect;
-	Point *lbox, *rbox, *tbox, *bbox;
-	int treeximin, treeximax;
-	int treeyimin, treeyimax;
+	Range* xroot;
+	Range* yroot;
 };
 
 SearchContext* __stdcall DLL_API create(const Point* points_begin, const Point* points_end);
