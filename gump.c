@@ -157,7 +157,20 @@ int32_t findHitsS(const Rect* rect, Point* in, int n, Point* out, int count, boo
 		}
 		i++;
 	}
+	return k;
+}
 
+int32_t findHitsSDef(const Rect* rect, Point* in, int n, Point* out, int count) {
+	int32_t k = 0;
+	int i = 0;
+	while (k < count && i < n) {
+		Point p = in[i];
+		if (p.x >= rect->lx && p.x <= rect->hx && p.y >= rect->ly && p.y <= rect->hy) {
+			out[k] = p;
+			k++;
+		}
+		i++;
+	}
 	return k;
 }
 
@@ -167,7 +180,7 @@ int32_t findHitsS(const Rect* rect, Point* in, int n, Point* out, int count, boo
 
 // baseline search - search full list of points, sorted by rank increasing
 int32_t searchBaseline(GumpSearchContext* sc, const Rect rect, const int32_t count, Point* out_points) {
-	return findHitsS(&rect, sc->ranksort, sc->N, out_points, count, isHit);
+	return findHitsSDef(&rect, sc->ranksort, sc->N, out_points, count);
 }
 
 
@@ -175,9 +188,9 @@ int32_t searchBaseline(GumpSearchContext* sc, const Rect rect, const int32_t cou
 int32_t searchBinary(GumpSearchContext* sc, const Rect rect, const int32_t count, Point* out_points) {
 	int32_t n = 0;
 	int xidxl = bsearch(sc->xsort, true, true, rect.lx, 0, sc->N);
-	int xidxr = bsearch(sc->xsort, true, false, rect.hx, 0, sc->N);
+	int xidxr = bsearch(sc->xsort, true, false, rect.hx, xidxl > 0 ? xidxl - 1 : 0, sc->N);
 	int yidxl = bsearch(sc->ysort, false, true, rect.ly, 0, sc->N);
-	int yidxr = bsearch(sc->ysort, false, false, rect.hy, 0, sc->N);
+	int yidxr = bsearch(sc->ysort, false, false, rect.hy, yidxl > 0 ? yidxl - 1 : 0, sc->N);
 	int nx = xidxr - xidxl + 1;
 	int ny = yidxr - yidxl + 1;
 
@@ -189,24 +202,23 @@ int32_t searchBinary(GumpSearchContext* sc, const Rect rect, const int32_t count
 	else return findHitsU(&rect, &sc->ysort[yidxl], ny, out_points, count, isHitX);
 }
 
-
 // ranked binary - narrow search to points in x range, y range, and check smaller set using range data structure
 int32_t rangeHits(GumpSearchContext* sc, const Rect rect, Range* range, int left, int right, int count, Point* out_points) {
-	if (range->left  && range->left->l  <= left && range->left->r  >= right) return rangeHits(sc, rect, range->left,  left, right, count, out_points);
-	if (range->right && range->right->l <= left && range->right->r >= right) return rangeHits(sc, rect, range->right, left, right, count, out_points);
 	if (range->mid   && range->mid->l   <= left && range->mid->r   >= right) return rangeHits(sc, rect, range->mid,   left, right, count, out_points);
+	if (range->left  && range->left->r  >= right) return rangeHits(sc, rect, range->left,  left, right, count, out_points);
+	if (range->right && range->right->l <= left)  return rangeHits(sc, rect, range->right, left, right, count, out_points);
 
 	int len = range->mid ? NODEMULTFACTOR*MAXRESLEN : LEAFMULTFACTOR*MAXRESLEN;
-	int hits = findHitsS(&rect, range->ranksort, len, out_points, count, isHit);
+	int hits = findHitsSDef(&rect, range->ranksort, len, out_points, count);
 	if (hits < count) return -1;
 	return hits;
 }
 
 int32_t searchRankBinary(GumpSearchContext* sc, const Rect rect, const int32_t count, Point* out_points) {
 	int xidxl = bsearch(sc->xsort, true, true, rect.lx, 0, sc->N);
-	int xidxr = bsearch(sc->xsort, true, false, rect.hx, 0, sc->N);
+	int xidxr = bsearch(sc->xsort, true, false, rect.hx, xidxl > 0 ? xidxl - 1 : 0, sc->N);
 	int yidxl = bsearch(sc->ysort, false, true, rect.ly, 0, sc->N);
-	int yidxr = bsearch(sc->ysort, false, false, rect.hy, 0, sc->N);
+	int yidxr = bsearch(sc->ysort, false, false, rect.hy, yidxl > 0 ? yidxl - 1 : 0, sc->N);
 	int nx = xidxr - xidxl + 1;
 	int ny = yidxr - yidxl + 1;
 
@@ -277,36 +289,16 @@ Range* buildRange(GumpSearchContext* sc, int l, int r, float (*sel)(Point* p), b
 	Point* sort = xOrY ? sc->xsort : sc->ysort;
 
 	int med = (l + r) / 2;
-	float cur = sel(&sort[med]);
-	float next = sel(&sort[med+1]);
-	while (cur == next) {
-		med++;
-		cur = sel(&sort[med]);
-		next = sel(&sort[med+1]);
+	if (!ismid) {
+		while (sel(&sort[med]) == sel(&sort[med+1])) med++;
+		range->left  = buildRange(sc, l, med, sel, false, xOrY);
+		range->right = buildRange(sc, med+1, r, sel, false, xOrY);
 	}
 
 	int q1 = (l + med) / 2;
-	cur = sel(&sort[q1]);
-	next = sel(&sort[q1+1]);
-	while (cur == next) {
-		q1++;
-		cur = sel(&sort[q1]);
-		next = sel(&sort[q1+1]);
-	}
-
 	int q3 = (med + r) / 2;
-	cur = sel(&sort[med]);
-	next = sel(&sort[med+1]);
-	while (cur == next) {
-		q3++;
-		cur = sel(&sort[q3]);
-		next = sel(&sort[q3+1]);
-	}
-
-	if (!ismid) {
-		range->left  = buildRange(sc, l, med, sel, false, xOrY);
-		range->right = buildRange(sc, med, r, sel, false, xOrY);
-	}
+	while (sel(&sort[q1]) == sel(&sort[q1+1])) q1++;
+	while (sel(&sort[q3]) == sel(&sort[q3+1])) q3++;
 	range->mid = buildRange(sc, q1, q3, sel, true, xOrY);
 
 	return range;
