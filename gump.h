@@ -17,7 +17,6 @@ struct Range {
 	int l, r;
 	bool leaf;
 	Point* ranksort;
-	Point* ranksorttop;
 	Range* left;
 	Range* right;
 	Range* mid;
