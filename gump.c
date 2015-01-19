@@ -3,9 +3,12 @@
 #include <string.h>
 #include "gump.h"
 
-#define MINRANGE 300000
+#define DEBUG 1
+#define BASELIMIT 10000
+#define MINRANGE 100000
 #define MAXRESLEN 20
-#define MULTFACTOR 1000
+#define NODEMULTFACTOR 200
+#define LEAFMULTFACTOR 750
 
 // DEBUGGING --------------------------------------------------------------------------------------
 
@@ -41,15 +44,21 @@ inline int rankCompare(const void* a, const void* b) {
 
 // HELPER FUNCTIONS -------------------------------------------------------------------------------
 
+int hitchecks = 0;
+int totalhitchecks = 0;
+
 inline bool isHit(const Rect* r, Point* p) {
+	hitchecks++;
 	return p->x >= r->lx && p->x <= r->hx && p->y >= r->ly && p->y <= r->hy;
 }
 
 inline bool isHitX(const Rect* r, Point* p) {
+	hitchecks++;
 	return p->x >= r->lx && p->x <= r->hx;
 }
 
 inline bool isHitY(const Rect* r, Point* p) {
+	hitchecks++;
 	return p->y >= r->ly && p->y <= r->hy;
 }
 
@@ -173,8 +182,7 @@ int32_t searchBinary(GumpSearchContext* sc, const Rect rect, const int32_t count
 
 	if (nx == 0 || ny == 0) return 0;
 
-	float ratio = (float)(nx < ny ? nx : ny) / (float)sc->N;
-	if (ratio > .01f) return searchBaseline(sc, rect, count, out_points);
+	if ((nx < ny ? nx : ny) > BASELIMIT) return searchBaseline(sc, rect, count, out_points);
 
 	if (nx < ny) return findHitsU(&rect, &sc->xsort[xidxl], nx, out_points, count, isHitY);
 	else return findHitsU(&rect, &sc->ysort[yidxl], ny, out_points, count, isHitX);
@@ -187,8 +195,13 @@ int32_t rangeHits(GumpSearchContext* sc, const Rect rect, Range* range, int left
 	if (range->right && range->right->l <= left && range->right->r >= right) return rangeHits(sc, rect, range->right, left, right, count, out_points);
 	if (range->mid   && range->mid->l   <= left && range->mid->r   >= right) return rangeHits(sc, rect, range->mid,   left, right, count, out_points);
 
-	int hits = findHitsS(&rect, range->ranksort, MULTFACTOR*MAXRESLEN, out_points, count, isHit);
-	if (hits < count) return -1;
+	int len = range->mid ? NODEMULTFACTOR*MAXRESLEN : LEAFMULTFACTOR*MAXRESLEN;
+	int hits = findHitsS(&rect, range->ranksort, len, out_points, count, isHit);
+	if (hits < count) {
+		if (range->mid) printf("node - ");
+		else printf("leaf - ");
+		return -1;
+	}
 	return hits;
 }
 
@@ -201,11 +214,27 @@ int32_t searchRankBinary(GumpSearchContext* sc, const Rect rect, const int32_t c
 	int ny = yidxr - yidxl + 1;
 
 	if (nx == 0 || ny == 0) return 0;
+
+	hitchecks = 0;
+
+	// use simple binary if small range
+	if ((nx < ny ? nx : ny) < 1000) {
+		if (nx < ny) return findHitsU(&rect, &sc->xsort[xidxl], nx, out_points, count, isHitY);
+		else return findHitsU(&rect, &sc->ysort[yidxl], ny, out_points, count, isHitX);
+	}
+
 	int hits = 0;
 	if (nx < ny) hits = rangeHits(sc, rect, sc->xroot, xidxl, xidxr, count, out_points);
 	else hits = rangeHits(sc, rect, sc->yroot, yidxl, yidxr, count, out_points);
 
-	if (hits == -1) hits = searchBinary(sc, rect, count, out_points);
+	if (hits == -1) {
+		printf("SHIT\n");
+		if (nx < ny) hits = findHitsU(&rect, &sc->xsort[xidxl], nx, out_points, count, isHitY);
+		else hits = findHitsU(&rect, &sc->ysort[yidxl], ny, out_points, count, isHitX);
+	}
+	//printf("%d, %d, %d, %d - %d checks (%d total)\n", xidxl, xidxr, yidxl, yidxr, hitchecks, totalhitchecks);
+
+	totalhitchecks += hitchecks;
 
 	return hits;
 }
@@ -230,15 +259,16 @@ Range* buildRange(GumpSearchContext* sc, int l, int r, float (*sel)(Point* p), b
 	range->ranksort = NULL;
 
 	int n = r - l + 1;
+	int len = n < MINRANGE ? LEAFMULTFACTOR*MAXRESLEN : NODEMULTFACTOR*MAXRESLEN;
 
-	range->ranksort = (Point*)calloc(MULTFACTOR*MAXRESLEN, sizeof(Point));
+	range->ranksort = (Point*)calloc(len, sizeof(Point));
 	const Rect rect = {
 		.lx = xOrY ? sc->xsort[l].x : sc->xsort[0].x,
 		.ly = xOrY ? sc->ysort[0].y : sc->ysort[l].y,
 		.hx = xOrY ? sc->xsort[r].x : sc->xsort[sc->N-1].x,
 		.hy = xOrY ? sc->ysort[sc->N-1].y : sc->ysort[r].y
 	};
-	searchBinary(sc, rect, MULTFACTOR*MAXRESLEN, range->ranksort);
+	searchBinary(sc, rect, len, range->ranksort);
 
 	// is this a leaf
 	if (n < MINRANGE) return range;
