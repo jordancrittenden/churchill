@@ -15,7 +15,6 @@ extern "C" {
 
 struct Range {
 	int l, r;
-	bool leaf;
 	Point* ranksort;
 	Range* left;
 	Range* right;

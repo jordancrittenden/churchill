@@ -4,11 +4,12 @@
 #include "gump.h"
 
 #define DEBUG 1
-#define BASELIMIT 10000
-#define MINRANGE 100000
 #define MAXRESLEN 20
-#define NODEMULTFACTOR 200
-#define LEAFMULTFACTOR 750
+#define SIMPLELIMIT 10000
+#define MINRANGE 50000
+#define BASELIMIT 10000
+#define NODEMULTFACTOR 500
+#define LEAFMULTFACTOR 300
 
 // DEBUGGING --------------------------------------------------------------------------------------
 
@@ -26,12 +27,12 @@ void printPoints(Point* points, int n) {
 
 // SORT ROUTINES ----------------------------------------------------------------------------------
 
-int xCompare(const void* a, const void* b) {
+inline int xcomp(const void* a, const void* b) {
 	float diff = ((Point*)a)->x - ((Point*)b)->x;
 	return diff > 0 ? 1 : diff < 0 ? -1 : 0;
 }
 
-int yCompare(const void* a, const void* b) {
+inline int ycomp(const void* a, const void* b) {
 	float diff = ((Point*)a)->y - ((Point*)b)->y;
 	return diff > 0 ? 1 : diff < 0 ? -1 : 0;
 }
@@ -44,21 +45,21 @@ inline int rankCompare(const void* a, const void* b) {
 
 // HELPER FUNCTIONS -------------------------------------------------------------------------------
 
-int hitchecks = 0;
-int totalhitchecks = 0;
+// int hitchecks = 0;
+// int totalhitchecks = 0;
 
 inline bool isHit(const Rect* r, Point* p) {
-	hitchecks++;
+	// hitchecks++;
 	return p->x >= r->lx && p->x <= r->hx && p->y >= r->ly && p->y <= r->hy;
 }
 
 inline bool isHitX(const Rect* r, Point* p) {
-	hitchecks++;
+	// hitchecks++;
 	return p->x >= r->lx && p->x <= r->hx;
 }
 
 inline bool isHitY(const Rect* r, Point* p) {
-	hitchecks++;
+	// hitchecks++;
 	return p->y >= r->ly && p->y <= r->hy;
 }
 
@@ -197,11 +198,7 @@ int32_t rangeHits(GumpSearchContext* sc, const Rect rect, Range* range, int left
 
 	int len = range->mid ? NODEMULTFACTOR*MAXRESLEN : LEAFMULTFACTOR*MAXRESLEN;
 	int hits = findHitsS(&rect, range->ranksort, len, out_points, count, isHit);
-	if (hits < count) {
-		if (range->mid) printf("node - ");
-		else printf("leaf - ");
-		return -1;
-	}
+	if (hits < count) return -1;
 	return hits;
 }
 
@@ -215,10 +212,10 @@ int32_t searchRankBinary(GumpSearchContext* sc, const Rect rect, const int32_t c
 
 	if (nx == 0 || ny == 0) return 0;
 
-	hitchecks = 0;
+	// hitchecks = 0;
 
 	// use simple binary if small range
-	if ((nx < ny ? nx : ny) < 1000) {
+	if ((nx < ny ? nx : ny) < SIMPLELIMIT) {
 		if (nx < ny) return findHitsU(&rect, &sc->xsort[xidxl], nx, out_points, count, isHitY);
 		else return findHitsU(&rect, &sc->ysort[yidxl], ny, out_points, count, isHitX);
 	}
@@ -228,13 +225,16 @@ int32_t searchRankBinary(GumpSearchContext* sc, const Rect rect, const int32_t c
 	else hits = rangeHits(sc, rect, sc->yroot, yidxl, yidxr, count, out_points);
 
 	if (hits == -1) {
-		printf("SHIT\n");
 		if (nx < ny) hits = findHitsU(&rect, &sc->xsort[xidxl], nx, out_points, count, isHitY);
 		else hits = findHitsU(&rect, &sc->ysort[yidxl], ny, out_points, count, isHitX);
+		// printf("Rect was %f,%f,%f,%f (%d,%d,%d,%d)\n",
+		// 	rect.lx, rect.hx, rect.ly, rect.hy,
+		// 	xidxl, xidxr, yidxl, yidxr
+		// );
 	}
 	//printf("%d, %d, %d, %d - %d checks (%d total)\n", xidxl, xidxr, yidxl, yidxr, hitchecks, totalhitchecks);
 
-	totalhitchecks += hitchecks;
+	// totalhitchecks += hitchecks;
 
 	return hits;
 }
@@ -329,14 +329,15 @@ __stdcall SearchContext* create(const Point* points_begin, const Point* points_e
 	memcpy(sc->xsort, points_begin, sc->N * sizeof(Point));
 	memcpy(sc->ysort, points_begin, sc->N * sizeof(Point));
 	memcpy(sc->ranksort, points_begin, sc->N * sizeof(Point));
-	qsort(sc->xsort, sc->N, sizeof(Point), xCompare);
-	qsort(sc->ysort, sc->N, sizeof(Point), yCompare);
+	qsort(sc->xsort, sc->N, sizeof(Point), xcomp);
+	qsort(sc->ysort, sc->N, sizeof(Point), ycomp);
 	qsort(sc->ranksort, sc->N, sizeof(Point), rankCompare);
 
 	sc->xroot = buildRange(sc, 0, sc->N-1, selx, false, true);
 	sc->yroot = buildRange(sc, 0, sc->N-1, sely, false, false);
 
-	printf("\nBuilt %d ranges\n", ranges);
+	// printf("\nBuilt %d ranges\n", ranges);
+	free(sc->ranksort);
 
 	return (SearchContext*)sc;
 }
@@ -350,7 +351,6 @@ __stdcall SearchContext* destroy(SearchContext* sc) {
 	GumpSearchContext* context = (GumpSearchContext*)sc;
 	free(context->xsort);
 	free(context->ysort);
-	free(context->ranksort);
 	freeRange(context->xroot);
 	freeRange(context->yroot);
 	return NULL;
