@@ -6,10 +6,10 @@
 #define DEBUG 1
 #define MAXRESLEN 20
 #define SIMPLELIMIT 10000
-#define MINRANGE 50000
+#define MINRANGE 20000
 #define BASELIMIT 10000
-#define NODEMULTFACTOR 500
-#define LEAFMULTFACTOR 300
+#define NODEMULTFACTOR 1000
+#define LEAFMULTFACTOR 100
 
 // DEBUGGING --------------------------------------------------------------------------------------
 
@@ -45,21 +45,21 @@ inline int rankCompare(const void* a, const void* b) {
 
 // HELPER FUNCTIONS -------------------------------------------------------------------------------
 
-// int hitchecks = 0;
-// int totalhitchecks = 0;
+int hitchecks = 0;
+int totalhitchecks = 0;
 
 inline bool isHit(const Rect* r, Point* p) {
-	// hitchecks++;
+	hitchecks++;
 	return p->x >= r->lx && p->x <= r->hx && p->y >= r->ly && p->y <= r->hy;
 }
 
 inline bool isHitX(const Rect* r, Point* p) {
-	// hitchecks++;
+	hitchecks++;
 	return p->x >= r->lx && p->x <= r->hx;
 }
 
 inline bool isHitY(const Rect* r, Point* p) {
-	// hitchecks++;
+	hitchecks++;
 	return p->y >= r->ly && p->y <= r->hy;
 }
 
@@ -146,25 +146,12 @@ int32_t findHitsU(const Rect* rect, Point* in, int n, Point* out, int count, boo
 	return hits;
 }
 
-int32_t findHitsS(const Rect* rect, Point* in, int n, Point* out, int count, bool (*hitcheck)(const Rect* r, Point* p)) {
+int32_t findHitsS(const Rect* rect, Point* in, int n, Point* out, int count) {
 	int32_t k = 0;
 	int i = 0;
 	while (k < count && i < n) {
 		Point p = in[i];
-		if (hitcheck(rect, &p)) {
-			out[k] = p;
-			k++;
-		}
-		i++;
-	}
-	return k;
-}
-
-int32_t findHitsSDef(const Rect* rect, Point* in, int n, Point* out, int count) {
-	int32_t k = 0;
-	int i = 0;
-	while (k < count && i < n) {
-		Point p = in[i];
+		hitchecks++;
 		if (p.x >= rect->lx && p.x <= rect->hx && p.y >= rect->ly && p.y <= rect->hy) {
 			out[k] = p;
 			k++;
@@ -180,7 +167,7 @@ int32_t findHitsSDef(const Rect* rect, Point* in, int n, Point* out, int count) 
 
 // baseline search - search full list of points, sorted by rank increasing
 int32_t searchBaseline(GumpSearchContext* sc, const Rect rect, const int32_t count, Point* out_points) {
-	return findHitsSDef(&rect, sc->ranksort, sc->N, out_points, count);
+	return findHitsS(&rect, sc->ranksort, sc->N, out_points, count);
 }
 
 
@@ -188,9 +175,9 @@ int32_t searchBaseline(GumpSearchContext* sc, const Rect rect, const int32_t cou
 int32_t searchBinary(GumpSearchContext* sc, const Rect rect, const int32_t count, Point* out_points) {
 	int32_t n = 0;
 	int xidxl = bsearch(sc->xsort, true, true, rect.lx, 0, sc->N);
-	int xidxr = bsearch(sc->xsort, true, false, rect.hx, xidxl > 0 ? xidxl - 1 : 0, sc->N);
+	int xidxr = bsearch(sc->xsort, true, false, rect.hx, 0, sc->N);
 	int yidxl = bsearch(sc->ysort, false, true, rect.ly, 0, sc->N);
-	int yidxr = bsearch(sc->ysort, false, false, rect.hy, yidxl > 0 ? yidxl - 1 : 0, sc->N);
+	int yidxr = bsearch(sc->ysort, false, false, rect.hy, 0, sc->N);
 	int nx = xidxr - xidxl + 1;
 	int ny = yidxr - yidxl + 1;
 
@@ -202,39 +189,59 @@ int32_t searchBinary(GumpSearchContext* sc, const Rect rect, const int32_t count
 	else return findHitsU(&rect, &sc->ysort[yidxl], ny, out_points, count, isHitX);
 }
 
-// ranked binary - narrow search to points in x range, y range, and check smaller set using range data structure
-int32_t rangeHits(GumpSearchContext* sc, const Rect rect, Range* range, int left, int right, int count, Point* out_points) {
-	if (range->mid   && range->mid->l   <= left && range->mid->r   >= right) return rangeHits(sc, rect, range->mid,   left, right, count, out_points);
-	if (range->left  && range->left->r  >= right) return rangeHits(sc, rect, range->left,  left, right, count, out_points);
-	if (range->right && range->right->l <= left)  return rangeHits(sc, rect, range->right, left, right, count, out_points);
 
-	int len = range->mid ? NODEMULTFACTOR*MAXRESLEN : LEAFMULTFACTOR*MAXRESLEN;
-	int hits = findHitsSDef(&rect, range->ranksort, len, out_points, count);
-	if (hits < count) return -1;
+// ranked binary - narrow search to points in x range, y range, and check smaller set using range data structure
+int32_t rangeHits(GumpSearchContext* sc, const Rect rect, Range* range, int left, int right, int count, Point* out_points, bool xOrY) {
+	if (range->left  && range->left->l  <= left && range->left->r  >= right) return rangeHits(sc, rect, range->left,  left, right, count, out_points, xOrY);
+	if (range->right && range->right->l <= left && range->right->r >= right) return rangeHits(sc, rect, range->right, left, right, count, out_points, xOrY);
+	if (range->mid   && range->mid->l   <= left && range->mid->r   >= right) return rangeHits(sc, rect, range->mid,   left, right, count, out_points, xOrY);
+
+	bool leaf = range->mid == NULL;
+	int hits = 0;
+	if (leaf) {
+		int rn = range->r - range->l + 1;
+		int idxl = bsearch(range->altsort, !xOrY, true, xOrY ? rect.ly : rect.lx, 0, rn);
+		int idxr = bsearch(range->altsort, !xOrY, false, xOrY ? rect.hy : rect.hx, 0, rn);
+		int n = idxr - idxl + 1;
+		if (n == 0) return 0;
+
+		int exprankchecks = (rn / n) * MAXRESLEN;
+		if (n < exprankchecks || exprankchecks > LEAFMULTFACTOR*MAXRESLEN) {
+			hits = findHitsU(&rect, &range->altsort[idxl], n, out_points, count, xOrY ? isHitX : isHitY);
+		} else {
+			hits = findHitsS(&rect, range->ranksort, LEAFMULTFACTOR*MAXRESLEN, out_points, count);
+			if (hits < count) { printf("LEAF\n"); return -1; }
+		}
+	} else {
+		hits = findHitsS(&rect, range->ranksort, NODEMULTFACTOR*MAXRESLEN, out_points, count);
+		if (hits < count) { printf("NODE\n"); return -1; }
+	}
+
 	return hits;
 }
 
 int32_t searchRankBinary(GumpSearchContext* sc, const Rect rect, const int32_t count, Point* out_points) {
 	int xidxl = bsearch(sc->xsort, true, true, rect.lx, 0, sc->N);
-	int xidxr = bsearch(sc->xsort, true, false, rect.hx, xidxl > 0 ? xidxl - 1 : 0, sc->N);
+	int xidxr = bsearch(sc->xsort, true, false, rect.hx, 0, sc->N);
 	int yidxl = bsearch(sc->ysort, false, true, rect.ly, 0, sc->N);
-	int yidxr = bsearch(sc->ysort, false, false, rect.hy, yidxl > 0 ? yidxl - 1 : 0, sc->N);
+	int yidxr = bsearch(sc->ysort, false, false, rect.hy, 0, sc->N);
 	int nx = xidxr - xidxl + 1;
 	int ny = yidxr - yidxl + 1;
 
 	if (nx == 0 || ny == 0) return 0;
 
-	// hitchecks = 0;
+	hitchecks = 0;
 
 	// use simple binary if small range
-	if ((nx < ny ? nx : ny) < SIMPLELIMIT) {
-		if (nx < ny) return findHitsU(&rect, &sc->xsort[xidxl], nx, out_points, count, isHitY);
-		else return findHitsU(&rect, &sc->ysort[yidxl], ny, out_points, count, isHitX);
-	}
+	// if ((nx < ny ? nx : ny) < SIMPLELIMIT) {
+	// 	printf("Falling back on unsorted search\n");
+	// 	if (nx < ny) return findHitsU(&rect, &sc->xsort[xidxl], nx, out_points, count, isHitY);
+	// 	else return findHitsU(&rect, &sc->ysort[yidxl], ny, out_points, count, isHitX);
+	// }
 
 	int hits = 0;
-	if (nx < ny) hits = rangeHits(sc, rect, sc->xroot, xidxl, xidxr, count, out_points);
-	else hits = rangeHits(sc, rect, sc->yroot, yidxl, yidxr, count, out_points);
+	if (nx < ny) hits = rangeHits(sc, rect, sc->xroot, xidxl, xidxr, count, out_points, true);
+	else hits = rangeHits(sc, rect, sc->yroot, yidxl, yidxr, count, out_points, false);
 
 	if (hits == -1) {
 		if (nx < ny) hits = findHitsU(&rect, &sc->xsort[xidxl], nx, out_points, count, isHitY);
@@ -243,10 +250,10 @@ int32_t searchRankBinary(GumpSearchContext* sc, const Rect rect, const int32_t c
 		// 	rect.lx, rect.hx, rect.ly, rect.hy,
 		// 	xidxl, xidxr, yidxl, yidxr
 		// );
+		// printf("%d, %d, %d, %d - %d checks (%d total)\n", xidxl, xidxr, yidxl, yidxr, hitchecks, totalhitchecks);
 	}
-	//printf("%d, %d, %d, %d - %d checks (%d total)\n", xidxl, xidxr, yidxl, yidxr, hitchecks, totalhitchecks);
 
-	// totalhitchecks += hitchecks;
+	totalhitchecks += hitchecks;
 
 	return hits;
 }
@@ -269,9 +276,11 @@ Range* buildRange(GumpSearchContext* sc, int l, int r, float (*sel)(Point* p), b
 	range->right = NULL;
 	range->mid = NULL;
 	range->ranksort = NULL;
+	range->altsort = NULL;
 
 	int n = r - l + 1;
 	int len = n < MINRANGE ? LEAFMULTFACTOR*MAXRESLEN : NODEMULTFACTOR*MAXRESLEN;
+	Point* sort = xOrY ? sc->xsort : sc->ysort;
 
 	range->ranksort = (Point*)calloc(len, sizeof(Point));
 	const Rect rect = {
@@ -280,25 +289,30 @@ Range* buildRange(GumpSearchContext* sc, int l, int r, float (*sel)(Point* p), b
 		.hx = xOrY ? sc->xsort[r].x : sc->xsort[sc->N-1].x,
 		.hy = xOrY ? sc->ysort[sc->N-1].y : sc->ysort[r].y
 	};
-	searchBinary(sc, rect, len, range->ranksort);
+	searchBaseline(sc, rect, len, range->ranksort);
 
 	// is this a leaf
-	if (n < MINRANGE) return range;
+	if (n < MINRANGE) {
+		range->altsort = (Point*)calloc(n, sizeof(Point));
+		memcpy(range->altsort, &sort[l], n * sizeof(Point));
+		qsort(range->altsort, n, sizeof(Point), xOrY ? ycomp : xcomp);
+		return range;
+	}
 
 	// don't split on same val
-	Point* sort = xOrY ? sc->xsort : sc->ysort;
-
 	int med = (l + r) / 2;
+	while (sel(&sort[med]) == sel(&sort[med+1])) med++;
+
+	int q1 = (l + med) / 2;
+	while (sel(&sort[q1]) == sel(&sort[q1+1])) q1++;
+
+	int q3 = (med + r) / 2;
+	while (sel(&sort[q3]) == sel(&sort[q3+1])) q3++;
+
 	if (!ismid) {
-		while (sel(&sort[med]) == sel(&sort[med+1])) med++;
 		range->left  = buildRange(sc, l, med, sel, false, xOrY);
 		range->right = buildRange(sc, med+1, r, sel, false, xOrY);
 	}
-
-	int q1 = (l + med) / 2;
-	int q3 = (med + r) / 2;
-	while (sel(&sort[q1]) == sel(&sort[q1+1])) q1++;
-	while (sel(&sort[q3]) == sel(&sort[q3+1])) q3++;
 	range->mid = buildRange(sc, q1, q3, sel, true, xOrY);
 
 	return range;
@@ -309,6 +323,7 @@ void freeRange(Range* range) {
 	if (range->right)    freeRange(range->right);
 	if (range->mid)      freeRange(range->mid);
 	if (range->ranksort) free(range->ranksort);
+	if (range->altsort)  free(range->altsort);
 	free(range);
 }
 
@@ -328,7 +343,6 @@ __stdcall SearchContext* create(const Point* points_begin, const Point* points_e
 	sc->xroot = buildRange(sc, 0, sc->N-1, selx, false, true);
 	sc->yroot = buildRange(sc, 0, sc->N-1, sely, false, false);
 
-	// printf("\nBuilt %d ranges\n", ranges);
 	free(sc->ranksort);
 
 	return (SearchContext*)sc;
