@@ -1,5 +1,6 @@
 log.txt
 gump.dll
+gumption.dll
 *.o
 *.a
 *.csv
