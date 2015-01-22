@@ -5,8 +5,8 @@
 
 #define DEBUG 1
 #define SIMPLELIMIT 500
-#define MAXDEPTH 6
-#define NODERANKSIZE 100
+#define MAXDEPTH 5
+#define NODERANKSIZE 1000
 
 // DEBUGGING --------------------------------------------------------------------------------------
 
@@ -232,13 +232,15 @@ int32_t findHitsS(const Rect* rect, Point* in, int n, Point* out, int count) {
 
 int32_t treeHits(GumpSearchContext* sc, const Rect rect, TreeNode* node, int count, Point* out_points) {
 	if (node->children && node->children[0]) {
-		for (int i = 0; i < 9; i++) {
-			TreeNode* child = node->children[i];
-			if (isRectInside((Rect*)&rect, child->rect)) {
-				printf("Rect is inside "); printRect(*child->rect);
-				return treeHits(sc, rect, child, count, out_points);
-			}// else { printf("Rect did not fall inside "); printRect(*child->rect); }
-		}
+		if (isRectInside((Rect*)&rect, node->children[1-1]->rect)) return treeHits(sc, rect, node->children[1-1], count, out_points);
+		if (isRectInside((Rect*)&rect, node->children[3-1]->rect)) return treeHits(sc, rect, node->children[3-1], count, out_points);
+		if (isRectInside((Rect*)&rect, node->children[7-1]->rect)) return treeHits(sc, rect, node->children[7-1], count, out_points);
+		if (isRectInside((Rect*)&rect, node->children[9-1]->rect)) return treeHits(sc, rect, node->children[9-1], count, out_points);
+		if (isRectInside((Rect*)&rect, node->children[5-1]->rect)) return treeHits(sc, rect, node->children[5-1], count, out_points);
+		if (isRectInside((Rect*)&rect, node->children[2-1]->rect)) return treeHits(sc, rect, node->children[2-1], count, out_points);
+		if (isRectInside((Rect*)&rect, node->children[4-1]->rect)) return treeHits(sc, rect, node->children[4-1], count, out_points);
+		if (isRectInside((Rect*)&rect, node->children[6-1]->rect)) return treeHits(sc, rect, node->children[6-1], count, out_points);
+		if (isRectInside((Rect*)&rect, node->children[8-1]->rect)) return treeHits(sc, rect, node->children[8-1], count, out_points);
 	}
 
 	int hits = findHitsS(&rect, node->ranksort, node->N, out_points, count);
@@ -333,7 +335,7 @@ TreeNode* buildNode(float xmin, float xmax, float ymin, float ymax, int depth, T
 	return node;
 }
 
-void dropPoint(TreeNode* node, Point p) {
+void dropPoint(TreeNode* node, Point p, bool drop1, bool drop2, bool drop3, bool drop4, bool drop6, bool drop7, bool drop8, bool drop9) {
 	// if this is not a leaf, drop into self and children
 	if (node->children && node->children[0]) {
 		if (isHit(node->rect, &p)) {
@@ -360,12 +362,29 @@ void dropPoint(TreeNode* node, Point p) {
 			}
 		}
 
-		for (int i = 0; i < 9; i++) {
-			if (isHit(node->children[i]->rect, &p)) {
-				dropPoint(node->children[i], p);
-				break;
-			}
+		bool drop5 = false;
+		if (drop1 && isHit(node->children[1-1]->rect, &p)) {
+			drop5 = true;
+			dropPoint(node->children[1-1], p, true,  true,  true,  true,  true,  true,  true,  true);
+			if (drop2) dropPoint(node->children[2-1], p, false, true,  false, false, false, false, true,  false);
+			if (drop4) dropPoint(node->children[4-1], p, false, false, false, true,  true,  false, false, false);
+		} else if (drop3 && isHit(node->children[3-1]->rect, &p)) {
+			drop5 = true;
+			dropPoint(node->children[3-1], p, true,  true,  true,  true,  true,  true,  true,  true);
+			if (drop2) dropPoint(node->children[2-1], p, false, true,  false, false, false, false, true,  false);
+			if (drop6) dropPoint(node->children[6-1], p, false, false, false, true,  true,  false, false, false);
+		} else if (drop7 && isHit(node->children[7-1]->rect, &p)) {
+			drop5 = true;
+			dropPoint(node->children[7-1], p, true,  true,  true,  true,  true,  true,  true,  true);
+			if (drop4) dropPoint(node->children[4-1], p, false, false, false, true,  true,  false, false, false);
+			if (drop8) dropPoint(node->children[8-1], p, false, true,  false, false, false, false, true,  false);
+		} else if (drop9 && isHit(node->children[9-1]->rect, &p)) {
+			drop5 = true;
+			dropPoint(node->children[9-1], p, true,  true,  true,  true,  true,  true,  true,  true);
+			if (drop6) dropPoint(node->children[6-1], p, false, false, false, true,  true,  false, false, false);
+			if (drop8) dropPoint(node->children[8-1], p, false, true,  false, false, false, false, true,  false);
 		}
+		if (drop5) dropPoint(node->children[5-1], p, false, false, false, false, false, false, false, false);
 	} else {
 		if (isHit(node->rect, &p)) {
 			// double capacity if hit limit
@@ -433,7 +452,7 @@ __stdcall SearchContext* create(const Point* points_begin, const Point* points_e
 	printf("Dropping points\n");
 	for (int i = 0; i < sc->N; i++) {
 		if (i % 500000 == 0) printf("Dropped %d points\n", i);
-		dropPoint(sc->root, sc->xsort[i]);
+		dropPoint(sc->root, sc->xsort[i], true, true, true, true, true, true, true, true);
 	}
 	printf("Sorting tree\n");
 	sortNode(sc->root);
