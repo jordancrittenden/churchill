@@ -13,23 +13,21 @@ extern "C" {
 #define DLL_API __declspec(dllimport)
 #endif
 
-struct Range {
-	int l, r;
-	Point* altgaps;
-	int altgapsN;
+struct TreeNode {
+	int32_t N; // how many points are in ranksort
+	int32_t K; // how much can ranksort hold
+	Rect* rect;
 	Point* ranksort;
-	Range* left;
-	Range* right;
-	Range* mid;
+	TreeNode* children;
+	int maxrank;
+	int maxpos;
 };
 
 struct GumpSearchContext {
 	int32_t N;
+	TreeNode* root;
 	Point* xsort;
 	Point* ysort;
-	Point* ranksort;
-	Range* xroot;
-	Range* yroot;
 };
 
 SearchContext* __stdcall DLL_API create(const Point* points_begin, const Point* points_end);

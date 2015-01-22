@@ -27,11 +27,6 @@ inline bool isHitYMinRank(const Rect* r, Point* p) {
 	return p->rank < _rankmax && p->y >= r->ly && p->y <= r->hy;
 }
 
-inline bool isRectInside(Rect* r1, Rect* r2) {
-	return r2->lx >= r1->lx && r2->lx <= r1->hx && r2->ly >= r1->ly && r2->ly <= r1->hy &&
-	       r2->hx >= r1->lx && r2->hx <= r1->hx && r2->hy >= r1->ly && r2->hy <= r1->hy;
-}
-
 inline bool isRectOverlap(Rect* r1, Rect* r2) {
 	return r1->lx < r2->hx && r1->hx > r2->lx && r1->ly < r2->hy && r1->hy > r2->ly;
 }

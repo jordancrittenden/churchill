@@ -4,12 +4,8 @@
 #include "gumption.h"
 
 #define DEBUG 1
-#define MAXRESLEN 20
-#define SIMPLELIMIT 1000
-#define MINRANGE 100000
-#define BASELIMIT 10000
-#define NODEMULTFACTOR 1000
-#define LEAFMULTFACTOR 100
+#define SIMPLELIMIT 500
+#define MAXDEPTH 4
 
 // DEBUGGING --------------------------------------------------------------------------------------
 
@@ -48,17 +44,21 @@ inline int rankcomp(const void* a, const void* b) {
 int hitchecks = 0;
 int totalhitchecks = 0;
 
-inline bool isHit(const Rect* r, Point* p) {
+inline bool isRectInside(Rect* r1, Rect* r2) {
+	return r2->lx >= r1->lx && r2->ly >= r1->ly && r2->hx <= r1->hx && r2->hy <= r1->hy;
+}
+
+inline bool isHit(Rect* r, Point* p) {
 	// hitchecks++;
 	return p->x >= r->lx && p->x <= r->hx && p->y >= r->ly && p->y <= r->hy;
 }
 
-inline bool isHitX(const Rect* r, Point* p) {
+inline bool isHitX(Rect* r, Point* p) {
 	// hitchecks++;
 	return p->x >= r->lx && p->x <= r->hx;
 }
 
-inline bool isHitY(const Rect* r, Point* p) {
+inline bool isHitY(Rect* r, Point* p) {
 	// hitchecks++;
 	return p->y >= r->ly && p->y <= r->hy;
 }
@@ -227,47 +227,23 @@ int32_t findHitsS(const Rect* rect, Point* in, int n, Point* out, int count) {
 
 
 
-// SEARCH IMPLEMENTATIONS -------------------------------------------------------------------------
+// SEARCH IMPLEMENTATION --------------------------------------------------------------------------
 
-// baseline search - search full list of points, sorted by rank increasing
-int32_t searchBaseline(GumpSearchContext* sc, const Rect rect, const int32_t count, Point* out_points) {
-	return findHitsS(&rect, sc->ranksort, sc->N, out_points, count);
-}
+int32_t treeHits(GumpSearchContext* sc, const Rect rect, TreeNode* node, int count, Point* out_points) {
+	if (node->children) {
+		for (int i = 0; i < 9; i++) {
+			TreeNode child = node->children[i];
+			if (isRectInside((Rect*)&rect, child.rect)) return treeHits(sc, rect, &child, count, out_points);
+		}
+	}
 
-
-// binary search - narrow search to points in x range, y range, and check smaller set
-int32_t searchBinary(GumpSearchContext* sc, const Rect rect, const int32_t count, Point* out_points) {
-	int32_t n = 0;
-	int xidxl = bsearch(sc->xsort, true, true, rect.lx, 0, sc->N);
-	int xidxr = bsearch(sc->xsort, true, false, rect.hx, 0, sc->N);
-	int yidxl = bsearch(sc->ysort, false, true, rect.ly, 0, sc->N);
-	int yidxr = bsearch(sc->ysort, false, false, rect.hy, 0, sc->N);
-	int nx = xidxr - xidxl + 1;
-	int ny = yidxr - yidxl + 1;
-
-	if (nx == 0 || ny == 0) return 0;
-
-	if ((nx < ny ? nx : ny) > BASELIMIT) return searchBaseline(sc, rect, count, out_points);
-
-	if (nx < ny) return findHitsUY(&rect, &sc->xsort[xidxl], nx, out_points, count);
-	else return findHitsUX(&rect, &sc->ysort[yidxl], ny, out_points, count);
-}
-
-
-// ranked binary - narrow search to points in x range, y range, and check smaller set using range data structure
-int32_t rangeHits(GumpSearchContext* sc, const Rect rect, Range* range, int left, int right, int count, Point* out_points) {
-	if (range->left  && range->left->l  <= left && range->left->r  >= right) return rangeHits(sc, rect, range->left,  left, right, count, out_points);
-	if (range->right && range->right->l <= left && range->right->r >= right) return rangeHits(sc, rect, range->right, left, right, count, out_points);
-	if (range->mid   && range->mid->l   <= left && range->mid->r   >= right) return rangeHits(sc, rect, range->mid,   left, right, count, out_points);
-
-	int len = range->mid ? NODEMULTFACTOR*MAXRESLEN : LEAFMULTFACTOR*MAXRESLEN;
-	int hits = findHitsS(&rect, range->ranksort, len, out_points, count);
-	//if (hits < count) { if (range->mid) printf("NODE\n"); else printf("LEAF\n"); return -1; }
-	if (hits < count) return -1;
+	int hits = findHitsS(&rect, node->ranksort, node->N, out_points, count);
+	if (hits < count) { if (node->children) printf("NODE\n"); else printf("LEAF\n"); return -1; }
+	//if (hits < count) return -1;
 	return hits;
 }
 
-int32_t searchRankBinary(GumpSearchContext* sc, const Rect rect, const int32_t count, Point* out_points) {
+int32_t searchTree(GumpSearchContext* sc, const Rect rect, const int32_t count, Point* out_points) {
 	int xidxl = bsearch(sc->xsort, true, true, rect.lx, 0, sc->N);
 	int xidxr = bsearch(sc->xsort, true, false, rect.hx, 0, sc->N);
 	int yidxl = bsearch(sc->ysort, false, true, rect.ly, 0, sc->N);
@@ -285,13 +261,11 @@ int32_t searchRankBinary(GumpSearchContext* sc, const Rect rect, const int32_t c
 		else return findHitsUX(&rect, &sc->ysort[yidxl], ny, out_points, count);
 	}
 
-	int hits = 0;
-	if (nx < ny) hits = rangeHits(sc, rect, sc->xroot, xidxl, xidxr, count, out_points);
-	else hits = rangeHits(sc, rect, sc->yroot, yidxl, yidxr, count, out_points);
+	int hits = treeHits(sc, rect, sc->root, count, out_points);
 
 	if (hits == -1) {
-		// if (nx < ny) hits = findHitsUY(&rect, &sc->xsort[xidxl], nx, out_points, count);
-		// else hits = findHitsUX(&rect, &sc->ysort[yidxl], ny, out_points, count);
+		if (nx < ny) hits = findHitsUY(&rect, &sc->xsort[xidxl], nx, out_points, count);
+		else hits = findHitsUX(&rect, &sc->ysort[yidxl], ny, out_points, count);
 		// printf("Rect was %f,%f,%f,%f (%d,%d,%d,%d)\n",
 		// 	rect.lx, rect.hx, rect.ly, rect.hy,
 		// 	xidxl, xidxr, yidxl, yidxr
@@ -308,115 +282,151 @@ int32_t searchRankBinary(GumpSearchContext* sc, const Rect rect, const int32_t c
 
 // DLL IMPLEMENTATION -----------------------------------------------------------------------------
 
-int ranges = 0;
+int nodes = 0;
 
-float selx(Point* p) { return p->x; }
-float sely(Point* p) { return p->y; }
+void buildNode(TreeNode* node, float xmin, float xmax, float ymin, float ymax, int depth) {
+	// printf("Building node [%f,%f,%f,%f] at depth %d\n", xmin, xmax, ymin, ymax, depth);
+	nodes++;
+	node->rect = (Rect*)malloc(sizeof(Rect));
+	node->rect->lx = xmin;
+	node->rect->hx = xmax;
+	node->rect->ly = ymin;
+	node->rect->ly = ymax;
+	node->ranksort = NULL;
+	node->children = NULL;
 
-Range* buildRange(GumpSearchContext* sc, int l, int r, float (*sel)(Point* p), bool ismid, bool xOrY) {
-	ranges++;
-	Range* range = (Range*)malloc(sizeof(Range));
-	range->l = l;
-	range->r = r;
-	range->left = NULL;
-	range->right = NULL;
-	range->mid = NULL;
-	range->ranksort = NULL;
+	node->N = 0;
+	node->K = 1000;
+	node->ranksort = (Point*)calloc(node->K, sizeof(Point));
+	node->maxrank = -1;
+	node->maxpos = 0;
 
-	int n = r - l + 1;
-	int len = n < MINRANGE ? LEAFMULTFACTOR*MAXRESLEN : NODEMULTFACTOR*MAXRESLEN;
-
-	range->ranksort = (Point*)calloc(len, sizeof(Point));
-	const Rect rect = {
-		.lx = xOrY ? sc->xsort[l].x : sc->xsort[0].x,
-		.ly = xOrY ? sc->ysort[0].y : sc->ysort[l].y,
-		.hx = xOrY ? sc->xsort[r].x : sc->xsort[sc->N-1].x,
-		.hy = xOrY ? sc->ysort[sc->N-1].y : sc->ysort[r].y
-	};
-	searchBinary(sc, rect, len, range->ranksort);
-
-	// is this a leaf
-	if (n < MINRANGE) return range;
-
-	// don't split on same val
-	Point* sort = xOrY ? sc->xsort : sc->ysort;
-
-	int med = (l + r) / 2;
-	float cur = sel(&sort[med]);
-	float next = sel(&sort[med+1]);
-	while (cur == next) {
-		med++;
-		cur = sel(&sort[med]);
-		next = sel(&sort[med+1]);
+	// if this is not a leaf, build out children
+	if (depth < MAXDEPTH) {
+		node->children = (TreeNode*)calloc(9, sizeof(TreeNode));
+		float cxmin = 0.0f, cxmax = 0.0f;
+		float cymin = 0.0f, cymax = 0.0f;
+		float dx = xmax - xmin;
+		float dy = ymax - ymin;
+		for (int r = 0; r < 3; r++) {
+			cxmin = xmin + dx * r / 4;
+			cxmax = xmax - dx * (2 - r) / 4;
+			for (int c = 0; c < 3; c++) {
+				cymin = ymin + dy * c / 4;
+				cymax = ymax - dy * (2 - c) / 4;
+				buildNode(&(node->children[r*3 + c]), cxmin, cxmax, cymin, cymax, depth+1);
+			}
+		}
 	}
-
-	int q1 = (l + med) / 2;
-	cur = sel(&sort[q1]);
-	next = sel(&sort[q1+1]);
-	while (cur == next) {
-		q1++;
-		cur = sel(&sort[q1]);
-		next = sel(&sort[q1+1]);
-	}
-
-	int q3 = (med + r) / 2;
-	cur = sel(&sort[med]);
-	next = sel(&sort[med+1]);
-	while (cur == next) {
-		q3++;
-		cur = sel(&sort[q3]);
-		next = sel(&sort[q3+1]);
-	}
-
-	if (!ismid) {
-		range->left  = buildRange(sc, l, med, sel, false, xOrY);
-		range->right = buildRange(sc, med, r, sel, false, xOrY);
-	}
-	range->mid = buildRange(sc, q1, q3, sel, true, xOrY);
-
-	return range;
 }
 
-void freeRange(Range* range) {
-	if (range->left)     freeRange(range->left);
-	if (range->right)    freeRange(range->right);
-	if (range->mid)      freeRange(range->mid);
-	if (range->ranksort) free(range->ranksort);
-	free(range);
+void dropPoint(TreeNode* node, Point p) {
+	// if this is not a leaf, drop into self and children
+	if (node->children) {
+		if (isHit(node->rect, &p)) {
+			if (node->N < node->K) {
+				node->ranksort[node->N] = p;
+				if (p.rank > node->maxrank) {
+					node->maxrank = p.rank;
+					node->maxpos = node->N;
+				}
+				node->N++;
+			} else {
+				// replace previous max with this point
+				node->ranksort[node->maxpos] = p;
+
+				// find new max
+				node->maxrank = -1;
+				node->maxpos = -1;
+				for (int i = 0; i < node->N; i++) {
+					if (node->ranksort[i].rank > node->maxrank) {
+						node->maxrank = node->ranksort[i].rank;
+						node->maxpos = i;
+					}
+				}
+			}
+		}
+
+		for (int i = 0; i < 9; i++) {
+			if (isHit(node->children[i].rect, &p)) {
+				dropPoint(&(node->children[i]), p);
+			}
+		}
+	} else {
+		if (isHit(node->rect, &p)) {
+			// double capacity if hit limit
+			if (node->N == node->K) {
+				Point* temp = (Point*)calloc(node->K*2, sizeof(Point));
+				memcpy(temp, node->ranksort, node->K * sizeof(Point));
+				free(node->ranksort);
+				node->ranksort = temp;
+				node->K = node->K*2;
+			}
+
+			node->ranksort[node->N] = p;
+			node->N++;
+		}
+	}
+}
+
+void sortNode(TreeNode* node) {
+	qsort(node->ranksort, node->N, sizeof(Point), rankcomp);
+	if (node->children) for (int i = 0; i < 9; i++) sortNode(&node->children[i]);
+}
+
+void freeNode(TreeNode* node) {
+	free(node->ranksort);
+	if (node->children) for (int i = 0; i < 9; i++) freeNode(&node->children[i]);
+	free(node);
 }
 
 __stdcall SearchContext* create(const Point* points_begin, const Point* points_end) {
 	GumpSearchContext* sc = (GumpSearchContext*)malloc(sizeof(GumpSearchContext));
 	sc->N = points_end - points_begin;
+	sc->xsort = NULL;
+	sc->ysort = NULL;
+	sc->root = NULL;
+	if (sc->N == 0) return (SearchContext*)sc;
+
 	sc->xsort = (Point*)calloc(sc->N, sizeof(Point));
 	sc->ysort = (Point*)calloc(sc->N, sizeof(Point));
-	sc->ranksort = (Point*)calloc(sc->N, sizeof(Point));
 	memcpy(sc->xsort, points_begin, sc->N * sizeof(Point));
 	memcpy(sc->ysort, points_begin, sc->N * sizeof(Point));
-	memcpy(sc->ranksort, points_begin, sc->N * sizeof(Point));
 	qsort(sc->xsort, sc->N, sizeof(Point), xcomp);
 	qsort(sc->ysort, sc->N, sizeof(Point), ycomp);
-	qsort(sc->ranksort, sc->N, sizeof(Point), rankcomp);
 
-	sc->xroot = buildRange(sc, 0, sc->N-1, selx, false, true);
-	sc->yroot = buildRange(sc, 0, sc->N-1, sely, false, false);
+	float xmin = sc->xsort[1].x;
+	float xmax = sc->xsort[sc->N-2].x;
+	float ymin = sc->ysort[1].y;
+	float ymax = sc->ysort[sc->N-2].y;
+
+	// printf("Found data bounds [%f,%f,%f,%f]\n", xmin, xmax, ymin, ymax);
+
+	sc->root = (TreeNode*)malloc(sizeof(TreeNode));
+	printf("Building tree\n");
+	buildNode(sc->root, xmin, xmax, ymin, ymax, 0);
+	printf("Dropping points\n");
+	for (int i = 0; i < sc->N; i++) {
+		if (i % 100000 == 0) printf("Dropped %d points\n", i);
+		dropPoint(sc->root, sc->xsort[i]);
+	}
+	printf("Sorting tree\n");
+	sortNode(sc->root);
 
 	// printf("\nBuilt %d ranges\n", ranges);
-	free(sc->ranksort);
-
 	return (SearchContext*)sc;
 }
 
 __stdcall int32_t search(SearchContext* sc, const Rect rect, const int32_t count, Point* out_points) {
 	GumpSearchContext* context = (GumpSearchContext*)sc;
-	return searchRankBinary(context, rect, count, out_points);
+	if (context->N == 0) return 0;
+	return searchTree(context, rect, count, out_points);
 }
 
 __stdcall SearchContext* destroy(SearchContext* sc) {
 	GumpSearchContext* context = (GumpSearchContext*)sc;
-	free(context->xsort);
-	free(context->ysort);
-	freeRange(context->xroot);
-	freeRange(context->yroot);
+	if (context->xsort) free(context->xsort);
+	if (context->ysort) free(context->ysort);
+	if (context->root) freeNode(context->root);
 	return NULL;
 }
