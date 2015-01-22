@@ -14,18 +14,20 @@ extern "C" {
 #endif
 
 struct TreeNode {
-	int32_t N; // how many points are in ranksort
-	int32_t K; // how much can ranksort hold
+	int32_t N;
 	Rect* rect;
 	Point* ranksort;
 	TreeNode** children;
-	int maxrank;
-	int maxpos;
+	Point* hits1;
+	Point* hits3;
+	Point* hits7;
+	Point* hits9;
 };
 
 struct GumpSearchContext {
 	int32_t N;
 	TreeNode* root;
+	Point* ranksort;
 	Point* xsort;
 	Point* ysort;
 };
