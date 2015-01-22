@@ -5,7 +5,8 @@
 
 #define DEBUG 1
 #define SIMPLELIMIT 500
-#define MAXDEPTH 4
+#define MAXDEPTH 6
+#define NODERANKSIZE 100
 
 // DEBUGGING --------------------------------------------------------------------------------------
 
@@ -230,15 +231,20 @@ int32_t findHitsS(const Rect* rect, Point* in, int n, Point* out, int count) {
 // SEARCH IMPLEMENTATION --------------------------------------------------------------------------
 
 int32_t treeHits(GumpSearchContext* sc, const Rect rect, TreeNode* node, int count, Point* out_points) {
-	if (node->children) {
+	if (node->children && node->children[0]) {
 		for (int i = 0; i < 9; i++) {
-			TreeNode child = node->children[i];
-			if (isRectInside((Rect*)&rect, child.rect)) return treeHits(sc, rect, &child, count, out_points);
+			TreeNode* child = node->children[i];
+			if (isRectInside((Rect*)&rect, child->rect)) {
+				printf("Rect is inside "); printRect(*child->rect);
+				return treeHits(sc, rect, child, count, out_points);
+			}// else { printf("Rect did not fall inside "); printRect(*child->rect); }
 		}
 	}
 
 	int hits = findHitsS(&rect, node->ranksort, node->N, out_points, count);
-	if (hits < count) { if (node->children) printf("NODE\n"); else printf("LEAF\n"); return -1; }
+	printf("Found %d hits in %d ranked points\n", hits, node->N);
+	if (hits < count) { if (node->children && node->children[0]) printf("NODE\n"); else printf("LEAF\n"); return -1; }
+	else printf("Worked\n");
 	//if (hits < count) return -1;
 	return hits;
 }
@@ -284,45 +290,52 @@ int32_t searchTree(GumpSearchContext* sc, const Rect rect, const int32_t count, 
 
 int nodes = 0;
 
-void buildNode(TreeNode* node, float xmin, float xmax, float ymin, float ymax, int depth) {
+TreeNode* buildNode(float xmin, float xmax, float ymin, float ymax, int depth, TreeNode* over1, TreeNode* over2, TreeNode* over3, TreeNode* over4, TreeNode* over6, TreeNode* over7, TreeNode* over8, TreeNode* over9) {
 	// printf("Building node [%f,%f,%f,%f] at depth %d\n", xmin, xmax, ymin, ymax, depth);
 	nodes++;
+	TreeNode* node = (TreeNode*)malloc(sizeof(TreeNode));
 	node->rect = (Rect*)malloc(sizeof(Rect));
 	node->rect->lx = xmin;
 	node->rect->hx = xmax;
 	node->rect->ly = ymin;
-	node->rect->ly = ymax;
+	node->rect->hy = ymax;
 	node->ranksort = NULL;
 	node->children = NULL;
+	node->children = (TreeNode**)calloc(9, sizeof(TreeNode*));
+	for (int i = 0; i < 9; i++) node->children[i] = NULL;
 
 	node->N = 0;
-	node->K = 1000;
+	node->K = NODERANKSIZE;
 	node->ranksort = (Point*)calloc(node->K, sizeof(Point));
 	node->maxrank = -1;
 	node->maxpos = 0;
 
 	// if this is not a leaf, build out children
 	if (depth < MAXDEPTH) {
-		node->children = (TreeNode*)calloc(9, sizeof(TreeNode));
-		float cxmin = 0.0f, cxmax = 0.0f;
-		float cymin = 0.0f, cymax = 0.0f;
-		float dx = xmax - xmin;
-		float dy = ymax - ymin;
-		for (int r = 0; r < 3; r++) {
-			cxmin = xmin + dx * r / 4;
-			cxmax = xmax - dx * (2 - r) / 4;
-			for (int c = 0; c < 3; c++) {
-				cymin = ymin + dy * c / 4;
-				cymax = ymax - dy * (2 - c) / 4;
-				buildNode(&(node->children[r*3 + c]), cxmin, cxmax, cymin, cymax, depth+1);
-			}
-		}
+		float xmed = (xmax + xmin) / 2.0f;
+		float ymed = (ymax + ymin) / 2.0f;
+		float xq1 = (xmin + xmed) / 2.0f;
+		float xq3 = (xmed + xmax) / 2.0f;
+		float yq1 = (ymin + ymed) / 2.0f;
+		float yq3 = (ymed + ymax) / 2.0f;
+		TreeNode** c = node->children;
+		c[1-1] = over1 ? over1 : buildNode(xmin, xmed, ymin, ymed, depth+1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+		c[3-1] = over3 ? over3 : buildNode(xmed, xmax, ymin, ymed, depth+1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+		c[7-1] = over7 ? over7 : buildNode(xmin, xmed, ymed, ymax, depth+1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+		c[9-1] = over9 ? over9 : buildNode(xmed, xmax, ymed, ymax, depth+1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+		c[2-1] = over2 ? over2 : buildNode(xq1,  xq3,  ymin, ymed, depth+1, c[1-1]->children[3-1], NULL, c[3-1]->children[1-1], c[1-1]->children[6-1], c[3-1]->children[4-1], c[1-1]->children[9-1], NULL, c[3-1]->children[7-1]);
+		c[4-1] = over4 ? over4 : buildNode(xmin, xmax, yq1,  yq3,  depth+1, c[1-1]->children[7-1], c[1-1]->children[8-1], c[1-1]->children[9-1], NULL, NULL, c[7-1]->children[1-1], c[7-1]->children[2-1], c[7-1]->children[3-1]);
+		c[6-1] = over6 ? over6 : buildNode(xmed, xmax, yq1,  yq3,  depth+1, c[3-1]->children[7-1], c[3-1]->children[8-1], c[3-1]->children[9-1], NULL, NULL, c[9-1]->children[1-1], c[9-1]->children[2-1], c[9-1]->children[3-1]);
+		c[8-1] = over8 ? over8 : buildNode(xq1,  xq3,  ymed, ymax, depth+1, c[7-1]->children[3-1], NULL, c[9-1]->children[1-1], c[7-1]->children[6-1], c[9-1]->children[4-1], c[7-1]->children[9-1], NULL, c[9-1]->children[7-1]);
+		c[5-1] =                 buildNode(xq1,  xq3,  yq1,  yq3,  depth+1, c[1-1]->children[9-1], c[2-1]->children[8-1], c[3-1]->children[7-1], c[4-1]->children[6-1], c[6-1]->children[4-1], c[7-1]->children[3-1], c[8-1]->children[2-1], c[9-1]->children[1-1]);
 	}
+
+	return node;
 }
 
 void dropPoint(TreeNode* node, Point p) {
 	// if this is not a leaf, drop into self and children
-	if (node->children) {
+	if (node->children && node->children[0]) {
 		if (isHit(node->rect, &p)) {
 			if (node->N < node->K) {
 				node->ranksort[node->N] = p;
@@ -348,8 +361,9 @@ void dropPoint(TreeNode* node, Point p) {
 		}
 
 		for (int i = 0; i < 9; i++) {
-			if (isHit(node->children[i].rect, &p)) {
-				dropPoint(&(node->children[i]), p);
+			if (isHit(node->children[i]->rect, &p)) {
+				dropPoint(node->children[i], p);
+				break;
 			}
 		}
 	} else {
@@ -371,12 +385,24 @@ void dropPoint(TreeNode* node, Point p) {
 
 void sortNode(TreeNode* node) {
 	qsort(node->ranksort, node->N, sizeof(Point), rankcomp);
-	if (node->children) for (int i = 0; i < 9; i++) sortNode(&node->children[i]);
+	if (node->children && node->children[0]) for (int i = 0; i < 9; i++) sortNode(node->children[i]);
 }
 
-void freeNode(TreeNode* node) {
+void freeNode(TreeNode* node, bool free1, bool free2, bool free3, bool free4, bool free6, bool free7, bool free8, bool free9) {
+	free(node->rect);
 	free(node->ranksort);
-	if (node->children) for (int i = 0; i < 9; i++) freeNode(&node->children[i]);
+	if (node->children) {
+		if (node->children[1-1] && free1) freeNode(node->children[1-1], true,  true,  true,  true,  true,  true,  true,  true);
+		if (node->children[2-1] && free2) freeNode(node->children[2-1], false, true,  false, false, false, false, true,  false);
+		if (node->children[3-1] && free3) freeNode(node->children[3-1], true,  true,  true,  true,  true,  true,  true,  true);
+		if (node->children[4-1] && free4) freeNode(node->children[4-1], false, false, false, true,  true,  false, false, false);
+		if (node->children[5-1])          freeNode(node->children[5-1], false, false, false, false, false, false, false, false);
+		if (node->children[6-1] && free6) freeNode(node->children[6-1], false, false, false, true,  true,  false, false, false);
+		if (node->children[7-1] && free7) freeNode(node->children[7-1], true,  true,  true,  true,  true,  true,  true,  true);
+		if (node->children[8-1] && free8) freeNode(node->children[8-1], false, true,  false, false, false, false, true,  false);
+		if (node->children[9-1] && free9) freeNode(node->children[9-1], true,  true,  true,  true,  true,  true,  true,  true);
+		free(node->children);
+	}
 	free(node);
 }
 
@@ -400,14 +426,13 @@ __stdcall SearchContext* create(const Point* points_begin, const Point* points_e
 	float ymin = sc->ysort[1].y;
 	float ymax = sc->ysort[sc->N-2].y;
 
-	// printf("Found data bounds [%f,%f,%f,%f]\n", xmin, xmax, ymin, ymax);
+	printf("Found data bounds [%f,%f,%f,%f]\n", xmin, xmax, ymin, ymax);
 
-	sc->root = (TreeNode*)malloc(sizeof(TreeNode));
 	printf("Building tree\n");
-	buildNode(sc->root, xmin, xmax, ymin, ymax, 0);
+	sc->root = buildNode(xmin, xmax, ymin, ymax, 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
 	printf("Dropping points\n");
 	for (int i = 0; i < sc->N; i++) {
-		if (i % 100000 == 0) printf("Dropped %d points\n", i);
+		if (i % 500000 == 0) printf("Dropped %d points\n", i);
 		dropPoint(sc->root, sc->xsort[i]);
 	}
 	printf("Sorting tree\n");
@@ -420,6 +445,7 @@ __stdcall SearchContext* create(const Point* points_begin, const Point* points_e
 __stdcall int32_t search(SearchContext* sc, const Rect rect, const int32_t count, Point* out_points) {
 	GumpSearchContext* context = (GumpSearchContext*)sc;
 	if (context->N == 0) return 0;
+	printf("\n"); printRect(rect);
 	return searchTree(context, rect, count, out_points);
 }
 
@@ -427,6 +453,6 @@ __stdcall SearchContext* destroy(SearchContext* sc) {
 	GumpSearchContext* context = (GumpSearchContext*)sc;
 	if (context->xsort) free(context->xsort);
 	if (context->ysort) free(context->ysort);
-	if (context->root) freeNode(context->root);
+	if (context->root) freeNode(context->root, true, true, true, true, true, true, true, true);
 	return NULL;
 }

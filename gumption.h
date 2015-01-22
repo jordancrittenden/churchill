@@ -18,7 +18,7 @@ struct TreeNode {
 	int32_t K; // how much can ranksort hold
 	Rect* rect;
 	Point* ranksort;
-	TreeNode* children;
+	TreeNode** children;
 	int maxrank;
 	int maxpos;
 };
