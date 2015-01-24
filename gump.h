@@ -15,8 +15,6 @@ extern "C" {
 
 struct Range {
 	int l, r;
-	Point* altgaps;
-	int altgapsN;
 	Point* ranksort;
 	Range* left;
 	Range* right;

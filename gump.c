@@ -4,12 +4,11 @@
 #include "gump.h"
 
 #define DEBUG 1
-#define MAXRESLEN 20
+#define WRITEFILES 0
 #define SIMPLELIMIT 1000
-#define MINRANGE 100000
+#define MAXDEPTH 8 //39062.5
 #define BASELIMIT 10000
-#define NODEMULTFACTOR 1000
-#define LEAFMULTFACTOR 100
+#define DEPTHFACTOR 2000
 
 // DEBUGGING --------------------------------------------------------------------------------------
 
@@ -48,15 +47,24 @@ inline int rankcomp(const void* a, const void* b) {
 int hitchecks = 0;
 int totalhitchecks = 0;
 
-inline bool isHit(const Rect* r, Point* p) {
+inline float pow(float x, float p) {
+	float y = x;
+	for (int i = 1; i < p; i++) y *= x;
+	return y;
+}
+
+inline bool isHit(Rect* r, Point* p) {
+	hitchecks++;
 	return p->x >= r->lx && p->x <= r->hx && p->y >= r->ly && p->y <= r->hy;
 }
 
-inline bool isHitX(const Rect* r, Point* p) {
+inline bool isHitX(Rect* r, Point* p) {
+	hitchecks++;
 	return p->x >= r->lx && p->x <= r->hx;
 }
 
-inline bool isHitY(const Rect* r, Point* p) {
+inline bool isHitY(Rect* r, Point* p) {
+	hitchecks++;
 	return p->y >= r->ly && p->y <= r->hy;
 }
 
@@ -79,7 +87,7 @@ int bsearch(Point p[], bool xOrY, bool minOrMax, float v, int imin, int imax) {
 	return minOrMax ? imin : imax;
 }
 
-int32_t findHitsUX(const Rect* rect, Point* in, int n, Point* out, int count) {
+int32_t findHitsU(Rect* rect, Point* in, int n, Point* out, int count, bool (*hitcheck)(Rect* r, Point* p)) {
 	int i = 0;
 	int hits = 0;
 
@@ -87,7 +95,7 @@ int32_t findHitsUX(const Rect* rect, Point* in, int n, Point* out, int count) {
 	if (n <= count) {
 		for (int i = 0; i < n; i++) {
 			Point p = in[i];
-			if (p.x >= rect->lx && p.x <= rect->hx) {
+			if (hitcheck(rect, &p)) {
 				out[hits] = p;
 				hits++;
 			}
@@ -103,7 +111,7 @@ int32_t findHitsUX(const Rect* rect, Point* in, int n, Point* out, int count) {
 	// start by filling out with the first count hits from in
 	while (i < n && hits < count) {
 		Point p = in[i];
-		if (p.x >= rect->lx && p.x <= rect->hx) {
+		if (hitcheck(rect, &p)) {
 			out[hits] = p;
 			if (p.rank > max) {
 				max = p.rank;
@@ -122,7 +130,7 @@ int32_t findHitsUX(const Rect* rect, Point* in, int n, Point* out, int count) {
 			continue;
 		}
 
-		if (p.x >= rect->lx && p.x <= rect->hx) {
+		if (hitcheck(rect, &p)) {
 			// replace previous max with this point
 			out[maxloc] = p;
 
@@ -143,76 +151,12 @@ int32_t findHitsUX(const Rect* rect, Point* in, int n, Point* out, int count) {
 	return hits;
 }
 
-int32_t findHitsUY(const Rect* rect, Point* in, int n, Point* out, int count) {
-	int i = 0;
-	int hits = 0;
-
-	// if fewer points in test buffer than allowed hits, use all hits
-	if (n <= count) {
-		for (int i = 0; i < n; i++) {
-			Point p = in[i];
-			if (p.y >= rect->ly && p.y <= rect->hy) {
-				out[hits] = p;
-				hits++;
-			}
-		}
-		qsort(out, hits, sizeof(Point), rankcomp);
-		return hits;
-	}
-
-	int j = 0;
-	int max = -1;
-	int maxloc = -1;
-
-	// start by filling out with the first count hits from in
-	while (i < n && hits < count) {
-		Point p = in[i];
-		if (p.y >= rect->ly && p.y <= rect->hy) {
-			out[hits] = p;
-			if (p.rank > max) {
-				max = p.rank;
-				maxloc = hits;
-			}
-			hits++;
-		}
-		i++;
-	}
-
-	// search through the remaining points in in
-	while (i < n) {
-		Point p = in[i];
-		if (p.rank > max) {
-			i++;
-			continue;
-		}
-
-		if (p.y >= rect->ly && p.y <= rect->hy) {
-			// replace previous max with this point
-			out[maxloc] = p;
-
-			// find new max
-			max = -1;
-			maxloc = -1;
-			for (j = 0; j < count; j++) {
-				if (out[j].rank > max) {
-					max = out[j].rank;
-					maxloc = j;
-				}
-			}
-		}
-		i++;
-	}
-
-	qsort(out, hits, sizeof(Point), rankcomp);
-	return hits;
-}
-
-int32_t findHitsS(const Rect* rect, Point* in, int n, Point* out, int count) {
+int32_t findHitsS(Rect* rect, Point* in, int n, Point* out, int count) {
 	int32_t k = 0;
 	int i = 0;
 	while (k < count && i < n) {
 		Point p = in[i];
-		if (p.x >= rect->lx && p.x <= rect->hx && p.y >= rect->ly && p.y <= rect->hy) {
+		if (isHit(rect, &p)) {
 			out[k] = p;
 			k++;
 		}
@@ -228,7 +172,7 @@ int32_t findHitsS(const Rect* rect, Point* in, int n, Point* out, int count) {
 
 // baseline search - search full list of points, sorted by rank increasing
 int32_t searchBaseline(GumpSearchContext* sc, const Rect rect, const int32_t count, Point* out_points) {
-	return findHitsS(&rect, sc->ranksort, sc->N, out_points, count);
+	return findHitsS((Rect*)&rect, sc->ranksort, sc->N, out_points, count);
 }
 
 
@@ -246,21 +190,20 @@ int32_t searchBinary(GumpSearchContext* sc, const Rect rect, const int32_t count
 
 	if ((nx < ny ? nx : ny) > BASELIMIT) return searchBaseline(sc, rect, count, out_points);
 
-	if (nx < ny) return findHitsUY(&rect, &sc->xsort[xidxl], nx, out_points, count);
-	else return findHitsUX(&rect, &sc->ysort[yidxl], ny, out_points, count);
+	if (nx < ny) return findHitsU((Rect*)&rect, &sc->xsort[xidxl], nx, out_points, count, isHitY);
+	else return findHitsU((Rect*)&rect, &sc->ysort[yidxl], ny, out_points, count, isHitX);
 }
 
 
 // ranked binary - narrow search to points in x range, y range, and check smaller set using range data structure
-int32_t rangeHits(GumpSearchContext* sc, const Rect rect, Range* range, int left, int right, int count, Point* out_points) {
-	if (range->left  && range->left->l  <= left && range->left->r  >= right) return rangeHits(sc, rect, range->left,  left, right, count, out_points);
-	if (range->right && range->right->l <= left && range->right->r >= right) return rangeHits(sc, rect, range->right, left, right, count, out_points);
-	if (range->mid   && range->mid->l   <= left && range->mid->r   >= right) return rangeHits(sc, rect, range->mid,   left, right, count, out_points);
+int32_t rangeHits(GumpSearchContext* sc, const Rect rect, Range* range, int left, int right, int count, Point* out_points, int depth) {
+	if (range->left  && range->left->l  <= left && range->left->r  >= right) return rangeHits(sc, rect, range->left,  left, right, count, out_points, depth + 1);
+	if (range->right && range->right->l <= left && range->right->r >= right) return rangeHits(sc, rect, range->right, left, right, count, out_points, depth + 1);
+	if (range->mid   && range->mid->l   <= left && range->mid->r   >= right) return rangeHits(sc, rect, range->mid,   left, right, count, out_points, depth + 1);
 
-	int len = range->mid ? NODEMULTFACTOR*MAXRESLEN : LEAFMULTFACTOR*MAXRESLEN;
-	int hits = findHitsS(&rect, range->ranksort, len, out_points, count);
-	if (hits < count) { if (range->mid) printf("NODE\n"); else printf("LEAF\n"); return -1; }
-	if (hits < count) return -1;
+	int len = pow(2, MAXDEPTH - depth) * DEPTHFACTOR;
+	int hits = findHitsS((Rect*)&rect, range->ranksort, len, out_points, count);
+	if (hits < count) return -depth;
 	return hits;
 }
 
@@ -275,28 +218,33 @@ int32_t searchRankBinary(GumpSearchContext* sc, const Rect rect, const int32_t c
 	if (nx == 0 || ny == 0) return 0;
 
 	hitchecks = 0;
-
-	// use simple binary if small range
-	if ((nx < ny ? nx : ny) < SIMPLELIMIT) {
-		if (nx < ny) return findHitsUY(&rect, &sc->xsort[xidxl], nx, out_points, count);
-		else return findHitsUX(&rect, &sc->ysort[yidxl], ny, out_points, count);
-	}
-
 	int hits = 0;
-	if (nx < ny) hits = rangeHits(sc, rect, sc->xroot, xidxl, xidxr, count, out_points);
-	else hits = rangeHits(sc, rect, sc->yroot, yidxl, yidxr, count, out_points);
+	int method = 0;
 
-	if (hits == -1) {
-		if (nx < ny) hits = findHitsUY(&rect, &sc->xsort[xidxl], nx, out_points, count);
-		else hits = findHitsUX(&rect, &sc->ysort[yidxl], ny, out_points, count);
-		// printf("Rect was %f,%f,%f,%f (%d,%d,%d,%d)\n",
-		// 	rect.lx, rect.hx, rect.ly, rect.hy,
-		// 	xidxl, xidxr, yidxl, yidxr
-		// );
-		// printf("%d, %d, %d, %d - %d checks (%d total)\n", xidxl, xidxr, yidxl, yidxr, hitchecks, totalhitchecks);
+	if ((nx < ny ? nx : ny) < SIMPLELIMIT) {
+		method = 1;
+		if (nx < ny) hits = findHitsU((Rect*)&rect, &sc->xsort[xidxl], nx, out_points, count, isHitY);
+		else hits = findHitsU((Rect*)&rect, &sc->ysort[yidxl], ny, out_points, count, isHitX);
+	} else {
+		method = 2;
+		if (nx < ny) hits = rangeHits(sc, rect, sc->xroot, xidxl, xidxr, count, out_points, 1);
+		else hits = rangeHits(sc, rect, sc->yroot, yidxl, yidxr, count, out_points, 1);
+
+		if (hits < 0) {
+			printf("failure at level %d - ", hits);
+			method = 3;
+			if (nx < ny) hits = findHitsU((Rect*)&rect, &sc->xsort[xidxl], nx, out_points, count, isHitY);
+			else hits = findHitsU((Rect*)&rect, &sc->ysort[yidxl], ny, out_points, count, isHitX);
+			printf("%2d hits, %7d hitchecks\n", hits, hitchecks);
+		}
 	}
 
 	totalhitchecks += hitchecks;
+	if (WRITEFILES) {
+		FILE *f = fopen("rects.csv", "a");
+		fprintf(f, "%f,%f,%f,%f,%d,%d\n", rect.lx, rect.hx, rect.ly, rect.hy, hitchecks, method);
+		fclose(f);
+	}
 
 	return hits;
 }
@@ -310,7 +258,7 @@ int ranges = 0;
 float selx(Point* p) { return p->x; }
 float sely(Point* p) { return p->y; }
 
-Range* buildRange(GumpSearchContext* sc, int l, int r, float (*sel)(Point* p), bool xOrY, Range* lover, Range* rover) {
+Range* buildRange(GumpSearchContext* sc, int l, int r, float (*sel)(Point* p), bool xOrY, Range* lover, Range* rover, int depth) {
 	ranges++;
 	Range* range = (Range*)malloc(sizeof(Range));
 	range->l = l;
@@ -321,7 +269,7 @@ Range* buildRange(GumpSearchContext* sc, int l, int r, float (*sel)(Point* p), b
 	range->ranksort = NULL;
 
 	int n = r - l + 1;
-	int len = n < MINRANGE ? LEAFMULTFACTOR*MAXRESLEN : NODEMULTFACTOR*MAXRESLEN;
+	int len = pow(2, MAXDEPTH - depth) * DEPTHFACTOR;
 
 	range->ranksort = (Point*)calloc(len, sizeof(Point));
 	const Rect rect = {
@@ -333,7 +281,7 @@ Range* buildRange(GumpSearchContext* sc, int l, int r, float (*sel)(Point* p), b
 	searchBinary(sc, rect, len, range->ranksort);
 
 	// is this a leaf
-	if (n < MINRANGE) return range;
+	if (depth == MAXDEPTH) return range;
 
 	// don't split on same val
 	Point* sort = xOrY ? sc->xsort : sc->ysort;
@@ -365,9 +313,9 @@ Range* buildRange(GumpSearchContext* sc, int l, int r, float (*sel)(Point* p), b
 		next = sel(&sort[q3+1]);
 	}
 
-	range->left  = lover ? lover : buildRange(sc, l, med, sel, xOrY, NULL, NULL);
-	range->right = rover ? rover : buildRange(sc, med, r, sel, xOrY, NULL, NULL);
-	range->mid   = buildRange(sc, q1, q3, sel, xOrY, range->left->right, range->right->left);
+	range->left  = lover ? lover : buildRange(sc, l, med, sel, xOrY, NULL, NULL, depth+1);
+	range->right = rover ? rover : buildRange(sc, med, r, sel, xOrY, NULL, NULL, depth+1);
+	range->mid   = buildRange(sc, q1, q3, sel, xOrY, range->left->right, range->right->left, depth+1);
 
 	return range;
 }
@@ -393,10 +341,18 @@ __stdcall SearchContext* create(const Point* points_begin, const Point* points_e
 	qsort(sc->ysort, sc->N, sizeof(Point), ycomp);
 	qsort(sc->ranksort, sc->N, sizeof(Point), rankcomp);
 
-	sc->xroot = buildRange(sc, 0, sc->N-1, selx, true, NULL, NULL);
-	sc->yroot = buildRange(sc, 0, sc->N-1, sely, false, NULL, NULL);
+	sc->xroot = buildRange(sc, 0, sc->N-1, selx, true, NULL, NULL, 1);
+	sc->yroot = buildRange(sc, 0, sc->N-1, sely, false, NULL, NULL, 1);
 
-	// printf("\nBuilt %d ranges\n", ranges);
+	if (WRITEFILES) {
+		FILE *f = fopen("points.csv", "w");
+		for (int i = 0; i < sc->N; i++) {
+			fprintf(f, "%d,%f,%f\n", sc->ranksort[i].rank, sc->ranksort[i].x, sc->ranksort[i].y);
+		}
+		fclose(f);
+		remove("rects.csv");
+	}
+
 	free(sc->ranksort);
 
 	return (SearchContext*)sc;
