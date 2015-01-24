@@ -23,6 +23,7 @@ struct GumpSearchContext {
 	Point* ranksort;
 	float xmin, xmax, ymin, ymax;
 	float dx, dy;
+	Rect* trim;
 };
 
 SearchContext* __stdcall DLL_API create(const Point* points_begin, const Point* points_end);
