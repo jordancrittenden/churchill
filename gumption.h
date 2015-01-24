@@ -15,15 +15,25 @@ extern "C" {
 
 struct GumpSearchContext {
 	int32_t N;
+
+	// Basic search variables
+	Point* ranksort;
+
+	// Grid search variables
 	Point***** grid;
 	Rect**** rect;
 	int**** rlen;
-	Point* xsort;
-	Point* ysort;
-	Point* ranksort;
 	float xmin, xmax, ymin, ymax;
 	float dx, dy;
 	Rect* trim;
+
+	// Binary search variables
+	Point* xrank;
+	Point* yrank;
+	float* xsort;
+	float* ysort;
+	int* blocki;
+	int* blockr;
 };
 
 SearchContext* __stdcall DLL_API create(const Point* points_begin, const Point* points_end);
