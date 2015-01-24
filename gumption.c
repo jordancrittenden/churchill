@@ -5,12 +5,13 @@
 #include "gumption.h"
 
 #define DEBUG 1
-#define DIVS 15.0f
-#define BIGBLOCK 1000
-#define SMALLBLOCK 1000
+#define DIVS 12.0f
+#define DIVSKIP 2
+#define BIGBLOCK 2000
+#define SMALLBLOCK 2000
 #define SIMPLELIMIT 1000
 #define BLOCKSIZE 1000
-#define AREALIMIT 8.0f
+#define AREALIMIT 4.0f
 #define RANKMAX 100000000
 
 // DEBUGGING --------------------------------------------------------------------------------------
@@ -63,14 +64,17 @@ inline float rectArea(Rect* rect) {
 }
 
 inline bool isHit(Rect* r, Point* p) {
+	// hitchecks++;
 	return p->x >= r->lx && p->x <= r->hx && p->y >= r->ly && p->y <= r->hy;
 }
 
 inline bool isHitX(Rect* r, Point* p) {
+	// hitchecks++;
 	return p->x >= r->lx && p->x <= r->hx;
 }
 
 inline bool isHitY(Rect* r, Point* p) {
+	// hitchecks++;
 	return p->y >= r->ly && p->y <= r->hy;
 }
 
@@ -267,49 +271,56 @@ int32_t searchGrid(GumpSearchContext* sc, const Rect rect, const int32_t count, 
 
 	if (nx == 0 || ny == 0) return 0;
 
+	hitchecks = 0;
+
+	sc->trim->lx = rect.lx; sc->trim->hx = rect.hx;
+	sc->trim->ly = rect.ly; sc->trim->hy = rect.hy;
+	if (sc->trim->lx < sc->bounds->lx) sc->trim->lx = sc->bounds->lx;
+	if (sc->trim->hx > sc->bounds->hx) sc->trim->hx = sc->bounds->hx;
+	if (sc->trim->ly < sc->bounds->ly) sc->trim->ly = sc->bounds->ly;
+	if (sc->trim->hy > sc->bounds->hy) sc->trim->hy = sc->bounds->hy;
+
+	float xmini = (sc->trim->lx - sc->bounds->lx) / sc->dx;
+	float ymini = (sc->trim->ly - sc->bounds->ly) / sc->dy;
+	float xmaxi = (sc->trim->hx - sc->bounds->lx) / sc->dx;
+	float ymaxi = (sc->trim->hy - sc->bounds->ly) / sc->dy;
+
+	int i = floor(xmini);
+	int j = floor(ymini);
+	int w = ceil(xmaxi) - i - 1;
+	int h = ceil(ymaxi) - j - 1;
+
+	float rarea = rectArea(&sc->rect[i][j][w][h]);
+	float qarea = rectArea(sc->trim);
+	int rhitlen = sc->rlen[i][j][w][h];
+
 	int hits = 0;
 
-	// use simple binary if small range
-	if ((nx < ny ? nx : ny) < SIMPLELIMIT) {
-		// printf("Initial fallback on binary search\n");
+	// use simple binary if probability is we'll need to check fewer points
+	if ((nx < ny ? nx : ny) < 2 * count * rarea / qarea) {
+		// printf("Small search area - binary search\n");
 		if (nx < ny) hits = findHitsU((Rect*)&rect, &sc->xrank[xidxl], nx, out_points, count, isHitY);
 		else hits = findHitsU((Rect*)&rect, &sc->yrank[yidxl], ny, out_points, count, isHitX);
+	} else if (rhitlen == -1) {
+		// printf("Big search area - ranksort search\n");
+		hits = findHitsS(sc->trim, sc->ranksort, sc->N, out_points, count);
 	} else {
-		sc->trim->lx = rect.lx; sc->trim->hx = rect.hx;
-		sc->trim->ly = rect.ly; sc->trim->hy = rect.hy;
-		if (sc->trim->lx < sc->bounds->lx) sc->trim->lx = sc->bounds->lx;
-		if (sc->trim->hx > sc->bounds->hx) sc->trim->hx = sc->bounds->hx;
-		if (sc->trim->ly < sc->bounds->ly) sc->trim->ly = sc->bounds->ly;
-		if (sc->trim->hy > sc->bounds->hy) sc->trim->hy = sc->bounds->hy;
-
-		float xmini = (sc->trim->lx - sc->bounds->lx) / sc->dx;
-		float ymini = (sc->trim->ly - sc->bounds->ly) / sc->dy;
-		float xmaxi = (sc->trim->hx - sc->bounds->lx) / sc->dx;
-		float ymaxi = (sc->trim->hy - sc->bounds->ly) / sc->dy;
-
-		int i = floor(xmini);
-		int j = floor(ymini);
-		int w = ceil(xmaxi) - i - 1;
-		int h = ceil(ymaxi) - j - 1;
-
-		int len = sc->rlen[i][j][w][h];
-		if (len == -1) {
-			// printf("Big search area - searching ranksort\n");
-			hits = findHitsS(sc->trim, sc->ranksort, sc->N, out_points, count);
-		} else {
-			// printf("Query rect "); printRect(rect);
-			// printf("Checking trimmed rect "); printRect(*sc->trim);
-			// printf("Checking %d points in rect [%d,%d,%d,%d] ", sc->rlen[i][j][w][h], i, j, w, h); printRect(sc->rect[i][j][w][h]);
-			// printf("Bounds [%f,%f,%f,%f]\n", sc->xmin, sc->xmax, sc->ymin, sc->ymax);
-			hits = findHitsS(sc->trim, sc->grid[i][j][w][h], sc->rlen[i][j][w][h], out_points, count);
-		}
+		// printf("Medium search area - grid search\n");
+		// printf("Query rect "); printRect(rect);
+		// printf("Checking trimmed rect "); printRect(*sc->trim);
+		// printf("Checking %d points in rect [%d,%d,%d,%d] ", sc->rlen[i][j][w][h], i, j, w, h); printRect(sc->rect[i][j][w][h]);
+		// printf("Bounds [%f,%f,%f,%f]\n", sc->xmin, sc->xmax, sc->ymin, sc->ymax);
+		hits = findHitsS(sc->trim, sc->grid[i][j][w][h], sc->rlen[i][j][w][h], out_points, count);
 
 		if (hits < 20 && sc->rlen[i][j][w][h] > 20) {
-			printf("Found %d hits - falling back on binary search\n", hits);
+			// printf("Found %d hits - falling back on binary search\n", hits);
 			if (nx < ny) hits = findHitsU((Rect*)&rect, &sc->xrank[xidxl], nx, out_points, count, isHitY);
 			else hits = findHitsU((Rect*)&rect, &sc->yrank[yidxl], ny, out_points, count, isHitX);
 		}
 	}
+
+	totalhitchecks += hitchecks;
+	// printf("%6d checks : %7d total\n", hitchecks, totalhitchecks);
 
 	return hits;
 }
@@ -363,25 +374,27 @@ __stdcall SearchContext* create(const Point* points_begin, const Point* points_e
 	sc->dx = (sc->bounds->hx - sc->bounds->lx) / DIVS;
 	sc->dy = (sc->bounds->hy - sc->bounds->ly) / DIVS;
 
-	sc->grid = (Point*****)calloc(DIVS, sizeof(Point****));
-	sc->rlen = (int****)calloc(DIVS, sizeof(int***));
-	sc->rect = (Rect****)calloc(DIVS, sizeof(Rect***));
-	for (int i = 0; i < DIVS; i++) {
+	float d = DIVS;
+
+	sc->grid = (Point*****)calloc(d, sizeof(Point****));
+	sc->rlen = (int****)calloc(d, sizeof(int***));
+	sc->rect = (Rect****)calloc(d, sizeof(Rect***));
+	for (int i = 0; i < d; i++) {
 		float lx = sc->bounds->lx + (float)i * sc->dx;
-		sc->grid[i] = (Point****)calloc(DIVS, sizeof(Point***));
-		sc->rlen[i] = (int***)calloc(DIVS, sizeof(int**));
-		sc->rect[i] = (Rect***)calloc(DIVS, sizeof(Rect**));
-		for (int j = 0; j < DIVS; j++) {
+		sc->grid[i] = (Point****)calloc(d, sizeof(Point***));
+		sc->rlen[i] = (int***)calloc(d, sizeof(int**));
+		sc->rect[i] = (Rect***)calloc(d, sizeof(Rect**));
+		for (int j = 0; j < d; j++) {
 			float ly = sc->bounds->ly + (float)j * sc->dy;
-			sc->grid[i][j] = (Point***)calloc(DIVS, sizeof(Point**));
-			sc->rlen[i][j] = (int**)calloc(DIVS, sizeof(int*));
-			sc->rect[i][j] = (Rect**)calloc(DIVS, sizeof(Rect*));
-			for (int w = 0; w < DIVS - i; w++) {
+			sc->grid[i][j] = (Point***)calloc(d, sizeof(Point**));
+			sc->rlen[i][j] = (int**)calloc(d, sizeof(int*));
+			sc->rect[i][j] = (Rect**)calloc(d, sizeof(Rect*));
+			for (int w = 0; w < d - i; w++) {
 				float hx = sc->bounds->lx + (float)(i + w + 1) * sc->dx;
-				sc->grid[i][j][w] = (Point**)calloc(DIVS-j, sizeof(Point*));
-				sc->rlen[i][j][w] = (int*)calloc(DIVS-j, sizeof(int));
-				sc->rect[i][j][w] = (Rect*)calloc(DIVS-j, sizeof(Rect));
-				for (int h = 0; h < DIVS - j; h++) {
+				sc->grid[i][j][w] = (Point**)calloc(d-j, sizeof(Point*));
+				sc->rlen[i][j][w] = (int*)calloc(d-j, sizeof(int));
+				sc->rect[i][j][w] = (Rect*)calloc(d-j, sizeof(Rect));
+				for (int h = 0; h < d - j; h++) {
 					float hy = sc->bounds->ly + (float)(j + h + 1) * sc->dy;
 					sc->rect[i][j][w][h].lx = lx;
 					sc->rect[i][j][w][h].ly = ly;
@@ -415,6 +428,11 @@ __stdcall int32_t search(SearchContext* sc, const Rect rect, const int32_t count
 	if (context->N == 0) return 0;
 	int hits = searchGrid(context, rect, count, out_points);
 	// printPoints(out_points, hits);
+
+	// FILE *f = fopen("rects.csv", "a");
+	// fprintf(f, "%f,%f,%f,%f\n", rect.lx, rect.hx, rect.ly, rect.hy);
+	// fclose(f);
+
 	return hits;
 }
 
