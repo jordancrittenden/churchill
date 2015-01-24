@@ -4,15 +4,19 @@
 #include <math.h>
 #include "gumption.h"
 
-#define DEBUG 1
-#define DIVS 12.0f
-#define DIVSKIP 2
-#define BIGBLOCK 2000
-#define SMALLBLOCK 2000
-#define SIMPLELIMIT 1000
+#define DEBUG 0
+
+#define DIVS 12
+#define BIGBLOCK 1500
+#define SMALLBLOCK 5000
+#define AREALIMIT 10.0f
+
 #define BLOCKSIZE 1000
-#define AREALIMIT 4.0f
 #define RANKMAX 100000000
+
+#define MINRANGE 5000
+#define NODEPOINTS 1000
+#define LEAFPOINTS 100
 
 // DEBUGGING --------------------------------------------------------------------------------------
 
@@ -64,17 +68,17 @@ inline float rectArea(Rect* rect) {
 }
 
 inline bool isHit(Rect* r, Point* p) {
-	// hitchecks++;
+	hitchecks++;
 	return p->x >= r->lx && p->x <= r->hx && p->y >= r->ly && p->y <= r->hy;
 }
 
 inline bool isHitX(Rect* r, Point* p) {
-	// hitchecks++;
+	hitchecks++;
 	return p->x >= r->lx && p->x <= r->hx;
 }
 
 inline bool isHitY(Rect* r, Point* p) {
-	// hitchecks++;
+	hitchecks++;
 	return p->y >= r->ly && p->y <= r->hy;
 }
 
@@ -185,7 +189,6 @@ int32_t findHitsS(Rect* rect, Point* in, int n, Point* out, int count) {
 	int i = 0;
 	while (k < count && i < n) {
 		Point p = in[i];
-		hitchecks++;
 		if (isHit(rect, &p)) {
 			out[k] = p;
 			k++;
@@ -257,8 +260,20 @@ int32_t searchBinary(GumpSearchContext* sc, const Rect rect, const int32_t count
 
 	if (nx == 0 || ny == 0) return 0;
 
-	if (nx < ny) return findHitsB(sc, (Rect*)&rect, sc->xrank, xidxl, xidxr, out_points, count);
-	else return findHitsB(sc, (Rect*)&rect, sc->yrank, yidxl, yidxr, out_points, count);
+	if (nx < ny) return findHitsU((Rect*)&rect, &sc->xrank[xidxl], nx, out_points, count, isHitY);
+	else return findHitsU((Rect*)&rect, &sc->yrank[yidxl], ny, out_points, count, isHitX);
+}
+
+int32_t rangeHits(GumpSearchContext* sc, const Rect rect, Range* range, int left, int right, int count, Point* out_points) {
+	if (range->left  && range->left->l  <= left && range->left->r  >= right) return rangeHits(sc, rect, range->left,  left, right, count, out_points);
+	if (range->right && range->right->l <= left && range->right->r >= right) return rangeHits(sc, rect, range->right, left, right, count, out_points);
+	if (range->mid   && range->mid->l   <= left && range->mid->r   >= right) return rangeHits(sc, rect, range->mid,   left, right, count, out_points);
+
+	int len = range->mid ? NODEPOINTS : LEAFPOINTS;
+	int hits = findHitsS((Rect*)&rect, range->ranksort, len, out_points, count);
+	if (hits < count) { if (range->mid) printf("NODE - "); else printf("LEAF - "); return -1; }
+	if (hits < count) return -1;
+	return hits;
 }
 
 int32_t searchGrid(GumpSearchContext* sc, const Rect rect, const int32_t count, Point* out_points) {
@@ -290,37 +305,59 @@ int32_t searchGrid(GumpSearchContext* sc, const Rect rect, const int32_t count, 
 	int w = ceil(xmaxi) - i - 1;
 	int h = ceil(ymaxi) - j - 1;
 
-	float rarea = rectArea(&sc->rect[i][j][w][h]);
+	Rect* searchr = &sc->rect[i][j][w][h];
+	float rw = searchr->hx - searchr->lx;
+	float rh = searchr->hy - searchr->ly;
+	float rarea = rectArea(searchr);
+	float qw = sc->trim->hx - sc->trim->lx;
+	float qh = sc->trim->hy - sc->trim->ly;
 	float qarea = rectArea(sc->trim);
 	int rhitlen = sc->rlen[i][j][w][h];
 
 	int hits = 0;
 
+	int bigside   = (nx > ny ? nx : ny);
+	int smallside = (nx < ny ? nx : ny);
+
 	// use simple binary if probability is we'll need to check fewer points
-	if ((nx < ny ? nx : ny) < 2 * count * rarea / qarea) {
-		// printf("Small search area - binary search\n");
+	if (smallside < 2 * count * rarea / qarea) {
+		if (DEBUG) printf("Small search area - binary search : ");
 		if (nx < ny) hits = findHitsU((Rect*)&rect, &sc->xrank[xidxl], nx, out_points, count, isHitY);
 		else hits = findHitsU((Rect*)&rect, &sc->yrank[yidxl], ny, out_points, count, isHitX);
-	} else if (rhitlen == -1) {
-		// printf("Big search area - ranksort search\n");
+	}
+	// use range search for tall skinny or short fat rects
+	else if (bigside > 20 * smallside) {
+		if (DEBUG) printf("Disproportionate - range search   : ");
+		if (nx < ny) hits = rangeHits(sc, rect, sc->xroot, xidxl, xidxr, count, out_points);
+		else hits = rangeHits(sc, rect, sc->yroot, yidxl, yidxr, count, out_points);
+	}
+	// use simple ranksort search for big rects
+	else if (rhitlen == -1) {
+		if (DEBUG) printf("Big search area - ranksort search : ");
 		hits = findHitsS(sc->trim, sc->ranksort, sc->N, out_points, count);
-	} else {
-		// printf("Medium search area - grid search\n");
-		// printf("Query rect "); printRect(rect);
-		// printf("Checking trimmed rect "); printRect(*sc->trim);
-		// printf("Checking %d points in rect [%d,%d,%d,%d] ", sc->rlen[i][j][w][h], i, j, w, h); printRect(sc->rect[i][j][w][h]);
-		// printf("Bounds [%f,%f,%f,%f]\n", sc->xmin, sc->xmax, sc->ymin, sc->ymax);
+	}
+	// use grid search for everything else
+	else {
+		if (DEBUG) printf("Medium search area - grid search  : ");
 		hits = findHitsS(sc->trim, sc->grid[i][j][w][h], sc->rlen[i][j][w][h], out_points, count);
-
 		if (hits < 20 && sc->rlen[i][j][w][h] > 20) {
-			// printf("Found %d hits - falling back on binary search\n", hits);
-			if (nx < ny) hits = findHitsU((Rect*)&rect, &sc->xrank[xidxl], nx, out_points, count, isHitY);
-			else hits = findHitsU((Rect*)&rect, &sc->yrank[yidxl], ny, out_points, count, isHitX);
+			if (w == 0 || h == 0) printf("SMALL - "); else printf("BIG - ");
+			hits = -1;
 		}
 	}
 
+	// if a search method failed, use backup
+	if (hits == -1) {
+		printf("Found %d hits - falling back on binary search - \n", hits);
+		if (nx < ny) hits = findHitsU((Rect*)&rect, &sc->xrank[xidxl], nx, out_points, count, isHitY);
+		else hits = findHitsU((Rect*)&rect, &sc->yrank[yidxl], ny, out_points, count, isHitX);
+	}
+
 	totalhitchecks += hitchecks;
-	// printf("%6d checks : %7d total\n", hitchecks, totalhitchecks);
+	if (DEBUG) printf("%6d checks : %7d total\n", hitchecks, totalhitchecks);
+	// FILE *f = fopen("rects.csv", "a");
+	// fprintf(f, "%f,%f,%f,%f,%d\n", rect.lx, rect.hx, rect.ly, rect.hy, hitchecks);
+	// fclose(f);
 
 	return hits;
 }
@@ -329,7 +366,77 @@ int32_t searchGrid(GumpSearchContext* sc, const Rect rect, const int32_t count, 
 
 // DLL IMPLEMENTATION -----------------------------------------------------------------------------
 
-int nodes = 0;
+float selx(Point* p) { return p->x; }
+float sely(Point* p) { return p->y; }
+
+Range* buildRange(GumpSearchContext* sc, int l, int r, float (*sel)(Point* p), bool xOrY, Range* lover, Range* rover) {
+	Range* range = (Range*)malloc(sizeof(Range));
+	range->l = l;
+	range->r = r;
+	range->left = NULL;
+	range->right = NULL;
+	range->mid = NULL;
+	range->ranksort = NULL;
+
+	int n = r - l + 1;
+	int len = n < MINRANGE ? LEAFPOINTS : NODEPOINTS;
+
+	range->ranksort = (Point*)calloc(len, sizeof(Point));
+	const Rect rect = {
+		.lx = xOrY ? sc->xrank[l].x : sc->xrank[0].x,
+		.ly = xOrY ? sc->yrank[0].y : sc->yrank[l].y,
+		.hx = xOrY ? sc->xrank[r].x : sc->xrank[sc->N-1].x,
+		.hy = xOrY ? sc->yrank[sc->N-1].y : sc->yrank[r].y
+	};
+	searchBinary(sc, rect, len, range->ranksort);
+
+	// is this a leaf
+	if (n < MINRANGE) return range;
+
+	// don't split on same val
+	Point* sort = xOrY ? sc->xrank : sc->yrank;
+
+	int med = (l + r) / 2;
+	float cur = sel(&sort[med]);
+	float next = sel(&sort[med+1]);
+	while (cur == next) {
+		med++;
+		cur = sel(&sort[med]);
+		next = sel(&sort[med+1]);
+	}
+
+	int q1 = (l + med) / 2;
+	cur = sel(&sort[q1]);
+	next = sel(&sort[q1+1]);
+	while (cur == next) {
+		q1++;
+		cur = sel(&sort[q1]);
+		next = sel(&sort[q1+1]);
+	}
+
+	int q3 = (med + r) / 2;
+	cur = sel(&sort[med]);
+	next = sel(&sort[med+1]);
+	while (cur == next) {
+		q3++;
+		cur = sel(&sort[q3]);
+		next = sel(&sort[q3+1]);
+	}
+
+	range->left  = lover ? lover : buildRange(sc, l, med, sel, xOrY, NULL, NULL);
+	range->right = rover ? rover : buildRange(sc, med, r, sel, xOrY, NULL, NULL);
+	range->mid   = buildRange(sc, q1, q3, sel, xOrY, range->left->right, range->right->left);
+
+	return range;
+}
+
+void freeRange(Range* range, bool left, bool right) {
+	if (left  && range->left)     freeRange(range->left, true, true);
+	if (right && range->right)    freeRange(range->right, true, true);
+	if (range->mid)      freeRange(range->mid, false, false);
+	if (range->ranksort) free(range->ranksort);
+	free(range);
+}
 
 __stdcall SearchContext* create(const Point* points_begin, const Point* points_end) {
 	GumpSearchContext* sc = (GumpSearchContext*)malloc(sizeof(GumpSearchContext));
@@ -371,10 +478,9 @@ __stdcall SearchContext* create(const Point* points_begin, const Point* points_e
 	sc->bounds->hy = sc->yrank[sc->N-2].y;
 	float area = rectArea(sc->bounds);
 
-	sc->dx = (sc->bounds->hx - sc->bounds->lx) / DIVS;
-	sc->dy = (sc->bounds->hy - sc->bounds->ly) / DIVS;
-
 	float d = DIVS;
+	sc->dx = (sc->bounds->hx - sc->bounds->lx) / d;
+	sc->dy = (sc->bounds->hy - sc->bounds->ly) / d;
 
 	sc->grid = (Point*****)calloc(d, sizeof(Point****));
 	sc->rlen = (int****)calloc(d, sizeof(int***));
@@ -414,6 +520,9 @@ __stdcall SearchContext* create(const Point* points_begin, const Point* points_e
 		}
 	}
 
+	sc->xroot = buildRange(sc, 0, sc->N-1, selx, true, NULL, NULL);
+	sc->yroot = buildRange(sc, 0, sc->N-1, sely, false, NULL, NULL);
+
 	// FILE *f = fopen("points.csv", "w");
 	// for (int i = 0; i < sc->N; i++) {
 	// 	fprintf(f, "%d,%f,%f\n", sc->ranksort[i].rank, sc->ranksort[i].x, sc->ranksort[i].y);
@@ -426,14 +535,7 @@ __stdcall SearchContext* create(const Point* points_begin, const Point* points_e
 __stdcall int32_t search(SearchContext* sc, const Rect rect, const int32_t count, Point* out_points) {
 	GumpSearchContext* context = (GumpSearchContext*)sc;
 	if (context->N == 0) return 0;
-	int hits = searchGrid(context, rect, count, out_points);
-	// printPoints(out_points, hits);
-
-	// FILE *f = fopen("rects.csv", "a");
-	// fprintf(f, "%f,%f,%f,%f\n", rect.lx, rect.hx, rect.ly, rect.hy);
-	// fclose(f);
-
-	return hits;
+	return searchGrid(context, rect, count, out_points);
 }
 
 __stdcall SearchContext* destroy(SearchContext* sc) {
@@ -466,5 +568,7 @@ __stdcall SearchContext* destroy(SearchContext* sc) {
 		free(context->rlen[i]);
 		free(context->rect[i]);
 	}
+	freeRange(context->xroot, true, true);
+	freeRange(context->yroot, true, true);
 	return NULL;
 }
