@@ -23,7 +23,7 @@ struct GumpSearchContext {
 	Point***** grid;
 	Rect**** rect;
 	int**** rlen;
-	float xmin, xmax, ymin, ymax;
+	Rect* bounds;
 	float dx, dy;
 	Rect* trim;
 
