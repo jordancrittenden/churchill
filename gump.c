@@ -8,7 +8,7 @@
 #define SIMPLELIMIT 1000
 #define MAXDEPTH 8 //39062.5
 #define BASELIMIT 10000
-#define DEPTHFACTOR 2000
+#define DEPTHFACTOR 1000
 
 // DEBUGGING --------------------------------------------------------------------------------------
 
@@ -231,11 +231,11 @@ int32_t searchRankBinary(GumpSearchContext* sc, const Rect rect, const int32_t c
 		else hits = rangeHits(sc, rect, sc->yroot, yidxl, yidxr, count, out_points, 1);
 
 		if (hits < 0) {
-			printf("failure at level %d - ", hits);
+			printf("failure at depth %d - ", -hits);
 			method = 3;
 			if (nx < ny) hits = findHitsU((Rect*)&rect, &sc->xsort[xidxl], nx, out_points, count, isHitY);
 			else hits = findHitsU((Rect*)&rect, &sc->ysort[yidxl], ny, out_points, count, isHitX);
-			printf("%2d hits, %7d hitchecks\n", hits, hitchecks);
+			printf("%2d hits, %7d hitchecks (%d from unsorted search)\n", hits, hitchecks, (nx < ny) ? nx : ny);
 		}
 	}
 
