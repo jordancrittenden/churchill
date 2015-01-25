@@ -1,14 +1,24 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "gump.h"
+#include <math.h>
+#include "gumptionaire.h"
 
 #define DEBUG 1
-#define WRITEFILES 1
-#define SIMPLELIMIT 1000
-#define MAXDEPTH 8 //39062.5
+#define WRITEFILES 0
+
+// rank search parameters
 #define BASELIMIT 10000
+
+// binary search parameters
+#define BINARYLIMIT 1000
+
+// range search parameters
+#define MAXDEPTH 8 //39062.5
 #define DEPTHFACTOR 1000
+
+// grid search parameters
+#define DIVS 50
 
 // DEBUGGING --------------------------------------------------------------------------------------
 
@@ -47,10 +57,8 @@ inline int rankcomp(const void* a, const void* b) {
 int hitchecks = 0;
 int totalhitchecks = 0;
 
-inline float pow(float x, float p) {
-	float y = x;
-	for (int i = 1; i < p; i++) y *= x;
-	return y;
+inline float rectArea(Rect* rect) {
+	return (rect->hx - rect->lx) * (rect->hy - rect->ly);
 }
 
 inline bool isHit(Rect* r, Point* p) {
@@ -172,7 +180,7 @@ int32_t findHitsS(Rect* rect, Point* in, int n, Point* out, int count) {
 
 // baseline search - search full list of points, sorted by rank increasing
 int32_t searchBaseline(GumpSearchContext* sc, const Rect rect, const int32_t count, Point* out_points) {
-	return findHitsS((Rect*)&rect, sc->ranksort, sc->N, out_points, count);
+	return findHitsS((Rect*)&rect, sc->gridsort, sc->N, out_points, count);
 }
 
 
@@ -221,21 +229,45 @@ int32_t searchRange(GumpSearchContext* sc, const Rect rect, const int32_t count,
 	int hits = 0;
 	int method = 0;
 
-	if ((nx < ny ? nx : ny) < SIMPLELIMIT) {
+	if ((nx < ny ? nx : ny) < BINARYLIMIT) {
 		method = 1;
 		if (nx < ny) hits = findHitsU((Rect*)&rect, &sc->xsort[xidxl], nx, out_points, count, isHitY);
 		else hits = findHitsU((Rect*)&rect, &sc->ysort[yidxl], ny, out_points, count, isHitX);
 	} else {
-		method = 2;
-		if (nx < ny) hits = rangeHits(sc, rect, sc->xroot, xidxl, xidxr, count, out_points, 1);
-		else hits = rangeHits(sc, rect, sc->yroot, yidxl, yidxr, count, out_points, 1);
+		sc->trim->lx = rect.lx; sc->trim->hx = rect.hx;
+		sc->trim->ly = rect.ly; sc->trim->hy = rect.hy;
+		if (sc->trim->lx < sc->bounds->lx) sc->trim->lx = sc->bounds->lx;
+		if (sc->trim->hx > sc->bounds->hx) sc->trim->hx = sc->bounds->hx;
+		if (sc->trim->ly < sc->bounds->ly) sc->trim->ly = sc->bounds->ly;
+		if (sc->trim->hy > sc->bounds->hy) sc->trim->hy = sc->bounds->hy;
 
-		if (hits < 0) {
-			printf("failure at depth %d - ", -hits);
+		float xmini = (sc->trim->lx - sc->bounds->lx) / sc->dx;
+		float ymini = (sc->trim->ly - sc->bounds->ly) / sc->dy;
+		float xmaxi = (sc->trim->hx - sc->bounds->lx) / sc->dx;
+		float ymaxi = (sc->trim->hy - sc->bounds->ly) / sc->dy;
+
+		int i = floor(xmini);
+		int j = floor(ymini);
+		int w = ceil(xmaxi) - i - 1;
+		int h = ceil(ymaxi) - j - 1;
+
+		if (w == 0 && h == 0) {
+			method = 2;
+			printf("Using grid search  - ");
+			hits = findHitsS((Rect*)&rect, sc->grid[i][j], sc->rlen[i][j], out_points, count);
+			printf("%2d hits, %7d hitchecks\n", hits, hitchecks);
+		} else {
 			method = 3;
-			if (nx < ny) hits = findHitsU((Rect*)&rect, &sc->xsort[xidxl], nx, out_points, count, isHitY);
-			else hits = findHitsU((Rect*)&rect, &sc->ysort[yidxl], ny, out_points, count, isHitX);
-			printf("%2d hits, %7d hitchecks (%d from unsorted search)\n", hits, hitchecks, (nx < ny) ? nx : ny);
+			if (nx < ny) hits = rangeHits(sc, rect, sc->xroot, xidxl, xidxr, count, out_points, 1);
+			else hits = rangeHits(sc, rect, sc->yroot, yidxl, yidxr, count, out_points, 1);
+
+			if (hits < 0) {
+				printf("failure at depth %d - ", -hits);
+				method = 4;
+				if (nx < ny) hits = findHitsU((Rect*)&rect, &sc->xsort[xidxl], nx, out_points, count, isHitY);
+				else hits = findHitsU((Rect*)&rect, &sc->ysort[yidxl], ny, out_points, count, isHitX);
+				printf("%2d hits, %7d hitchecks\n", hits, hitchecks);
+			}
 		}
 	}
 
@@ -328,46 +360,132 @@ void freeRange(Range* range, bool left, bool right) {
 	free(range);
 }
 
+void buildGrid(GumpSearchContext* sc) {
+	sc->blocki = (int*)calloc(100, sizeof(int));
+	sc->blockr = (int*)calloc(100, sizeof(int));
+	sc->trim = (Rect*)malloc(sizeof(Rect));
+
+	sc->bounds = (Rect*)malloc(sizeof(Rect));
+	sc->bounds->lx = sc->xsort[1].x;
+	sc->bounds->hx = sc->xsort[sc->N-2].x;
+	sc->bounds->ly = sc->ysort[1].y;
+	sc->bounds->hy = sc->ysort[sc->N-2].y;
+	sc->area = rectArea(sc->bounds);
+	sc->dx = (sc->bounds->hx - sc->bounds->lx) / (float)DIVS;
+	sc->dy = (sc->bounds->hy - sc->bounds->ly) / (float)DIVS;
+	printf("Bounds are [%f,%f,%f,%f]: dx=%f, dy=%f, area %f\n",
+		sc->bounds->lx, sc->bounds->hx, sc->bounds->ly, sc->bounds->hy,
+		sc->dx, sc->dy, sc->area
+	);
+
+	memcpy(sc->gridsort, sc->xsort, sc->N * sizeof(Point));
+	sc->grid = (Point***)calloc(DIVS, sizeof(Point**));
+	sc->rlen = (int**)calloc(DIVS, sizeof(int*));
+	sc->rect = (Rect**)calloc(DIVS, sizeof(Rect*));
+	int xidxl = 0;
+	for (int i = 0; i < DIVS; i++) {
+		float lx = sc->bounds->lx + (float)i * sc->dx;
+		float hx = sc->bounds->lx + (float)(i+1) * sc->dx;
+		int xidxr = xidxl + bsearch(&sc->gridsort[xidxl], true, false, hx, 0, sc->N - xidxl + 1);
+		int nx = xidxr - xidxl + 1;
+		printf("Building vertical grid for x: [%f,%f], %d points, pos [%d,%d]\n", lx, hx, nx, xidxl, xidxr);
+		qsort(&sc->gridsort[xidxl], nx, sizeof(Point), ycomp);
+
+		sc->grid[i] = (Point**)calloc(DIVS, sizeof(Point*));
+		sc->rlen[i] = (int*)calloc(DIVS, sizeof(int));
+		sc->rect[i] = (Rect*)calloc(DIVS, sizeof(Rect));
+		int yidxl = xidxl;
+		for (int j = 0; j < DIVS; j++) {
+			float ly = sc->bounds->ly + (float)j * sc->dy;
+			float hy = sc->bounds->ly + (float)(j+1) * sc->dy;
+			int yidxr = yidxl + bsearch(&sc->gridsort[yidxl], false, false, hy, 0, xidxr - yidxl + 1);
+			int ny = yidxr - yidxl + 1;
+			// printf("Building grid element [%d,%d] for y: [%f,%f], %d points, pos [%d,%d]\n", i, j, ly, hy, ny, yidxl, yidxr);
+
+			if (ny == 0) {
+				sc->grid[i][j] = NULL;
+				sc->rlen[i][j] = 0;
+			} else {
+				sc->rlen[i][j] = ny;
+				qsort(&sc->gridsort[yidxl], ny, sizeof(Point), rankcomp);
+				sc->grid[i][j] = &sc->gridsort[yidxl];
+			}
+			sc->rect[i][j].lx = lx;
+			sc->rect[i][j].ly = ly;
+			sc->rect[i][j].hx = hx;
+			sc->rect[i][j].hy = hy;
+
+			yidxl = yidxr + 1;
+		}
+
+		xidxl = xidxr + 1;
+	}
+}
+
+void freeGrid(GumpSearchContext* sc) {
+	free(sc->blocki);
+	free(sc->blockr);
+	free(sc->trim);
+	for (int i = 0; i < DIVS; i++) {
+		free(sc->grid[i]);
+		free(sc->rlen[i]);
+		free(sc->rect[i]);
+	}
+	free(sc->grid);
+	free(sc->rlen);
+	free(sc->rect);
+	free(sc->gridsort);
+}
+
 __stdcall SearchContext* create(const Point* points_begin, const Point* points_end) {
 	GumpSearchContext* sc = (GumpSearchContext*)malloc(sizeof(GumpSearchContext));
 	sc->N = points_end - points_begin;
+	if (sc->N == 0) return (SearchContext*)sc;
+
 	sc->xsort = (Point*)calloc(sc->N, sizeof(Point));
 	sc->ysort = (Point*)calloc(sc->N, sizeof(Point));
-	sc->ranksort = (Point*)calloc(sc->N, sizeof(Point));
+	sc->gridsort = (Point*)calloc(sc->N, sizeof(Point));
 	memcpy(sc->xsort, points_begin, sc->N * sizeof(Point));
 	memcpy(sc->ysort, points_begin, sc->N * sizeof(Point));
-	memcpy(sc->ranksort, points_begin, sc->N * sizeof(Point));
+	memcpy(sc->gridsort, points_begin, sc->N * sizeof(Point));
 	qsort(sc->xsort, sc->N, sizeof(Point), xcomp);
 	qsort(sc->ysort, sc->N, sizeof(Point), ycomp);
-	qsort(sc->ranksort, sc->N, sizeof(Point), rankcomp);
+	qsort(sc->gridsort, sc->N, sizeof(Point), rankcomp);
 
 	sc->xroot = buildRange(sc, 0, sc->N-1, selx, true, NULL, NULL, 1);
 	sc->yroot = buildRange(sc, 0, sc->N-1, sely, false, NULL, NULL, 1);
 
+	buildGrid(sc);
+
 	if (WRITEFILES) {
 		FILE *f = fopen("points.csv", "w");
 		for (int i = 0; i < sc->N; i++) {
-			fprintf(f, "%d,%f,%f\n", sc->ranksort[i].rank, sc->ranksort[i].x, sc->ranksort[i].y);
+			fprintf(f, "%d,%f,%f\n", sc->gridsort[i].rank, sc->gridsort[i].x, sc->gridsort[i].y);
 		}
 		fclose(f);
 		remove("rects.csv");
 	}
-
-	free(sc->ranksort);
 
 	return (SearchContext*)sc;
 }
 
 __stdcall int32_t search(SearchContext* sc, const Rect rect, const int32_t count, Point* out_points) {
 	GumpSearchContext* context = (GumpSearchContext*)sc;
+	if (context->N == 0) return 0;
 	return searchRange(context, rect, count, out_points);
 }
 
 __stdcall SearchContext* destroy(SearchContext* sc) {
 	GumpSearchContext* context = (GumpSearchContext*)sc;
+	if (context->N == 0) {
+		free(context);
+		return NULL;
+	}
+
 	free(context->xsort);
 	free(context->ysort);
 	freeRange(context->xroot, true, true);
 	freeRange(context->yroot, true, true);
+	freeGrid(context);
 	return NULL;
 }
