@@ -43,7 +43,6 @@ struct GumpSearchContext {
 	Point** blocks;
 	int* blocki;
 	int* blockn;
-	Rect* trim;
 };
 
 SearchContext* __stdcall DLL_API create(const Point* points_begin, const Point* points_end);
