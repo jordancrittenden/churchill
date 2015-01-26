@@ -5,7 +5,7 @@
 #include "gumptionaire.h"
 
 #define DEBUG 1
-#define WRITEFILES 0
+#define WRITEFILES 1
 
 // rank search parameters
 #define BASELIMIT 10000
@@ -19,6 +19,9 @@
 
 // grid search parameters
 #define DIVS 50
+#define RANKMAX 100000000
+
+
 
 // DEBUGGING --------------------------------------------------------------------------------------
 
@@ -174,6 +177,62 @@ int32_t findHitsS(Rect* rect, Point* in, int n, Point* out, int count) {
 	return k;
 }
 
+int32_t findHitsB(GumpSearchContext* sc, Rect* rect, int bx, int by, int w, int h, Point* out, int count) {
+	int32_t k = 0;
+
+	printf("shit1 ");
+	for (int i = 0; i < w; i++) {
+		for (int j = 0; j < h; j++) {
+			int b = i*w + j;
+			sc->blocki[b] = 0;
+		}
+	}
+
+	printf("shit2\n");
+	int minrank = RANKMAX;
+	int mini = -1, minj = -1;
+	int fin = 0;
+	while (k < count) {
+		minrank = RANKMAX;
+		fin = 0;
+
+		// find min rank
+		for (int i = 0; i < w; i++) {
+			for (int j = 0; j < h; j++) {
+				int b = i*w + j;
+				printf("Checking length of results for block [%d,%d]\n", bx+i, by+j);
+				int bn = sc->rlen[bx+i][by+j];
+				printf("Block [%d,%d], length %d, index %d\n", i, j, bn, sc->blocki[b]);
+				if (sc->blocki[b] >= bn) { fin++; continue; }
+
+				Point p = sc->grid[bx+i][by+j][sc->blocki[b]];
+				printf("Condsidering rank %d in block [%d,%d] : %d\n", p.rank, i, j, b);
+				if (p.rank < minrank) {
+					mini = i;
+					minj = j;
+					minrank = p.rank;
+				}
+			}
+		}
+
+		// If we've hit the end of all blocks, exit
+		if (fin == w*h) break;
+
+		int bestb = mini*w+minj;
+		printf("Testing best rank %d from block [%d,%d] : %d - ", minrank, mini, minj, bestb);
+		Point bestp = sc->grid[bx+mini][by+minj][sc->blocki[bestb]];
+		if (isHit(rect, &bestp)) {
+			printf("it's a hit!\n");
+			out[k] = bestp;
+			k++;
+		}
+		else printf("not a hit\n");
+		sc->blocki[bestb]++;
+	}
+
+	return k;
+}
+
 
 
 // SEARCH IMPLEMENTATIONS -------------------------------------------------------------------------
@@ -241,20 +300,20 @@ int32_t searchRange(GumpSearchContext* sc, const Rect rect, const int32_t count,
 		if (sc->trim->ly < sc->bounds->ly) sc->trim->ly = sc->bounds->ly;
 		if (sc->trim->hy > sc->bounds->hy) sc->trim->hy = sc->bounds->hy;
 
-		float xmini = (sc->trim->lx - sc->bounds->lx) / sc->dx;
-		float ymini = (sc->trim->ly - sc->bounds->ly) / sc->dy;
-		float xmaxi = (sc->trim->hx - sc->bounds->lx) / sc->dx;
-		float ymaxi = (sc->trim->hy - sc->bounds->ly) / sc->dy;
+		int i = floor((sc->trim->lx - sc->bounds->lx) / sc->dx);
+		int j = floor((sc->trim->ly - sc->bounds->ly) / sc->dy);
+		int p = ceil((sc->trim->hx - sc->bounds->lx) / sc->dx);
+		int q = ceil((sc->trim->hy - sc->bounds->ly) / sc->dy);
+		if (p > DIVS) p = DIVS;
+		if (q > DIVS) q = DIVS;
+		int w = p - i;
+ 		int h = q - j;
 
-		int i = floor(xmini);
-		int j = floor(ymini);
-		int w = ceil(xmaxi) - i - 1;
-		int h = ceil(ymaxi) - j - 1;
-
-		if (w == 0 && h == 0) {
+		if (w == 1 && h == 1) {
 			method = 2;
-			printf("Using grid search  - ");
-			hits = findHitsS((Rect*)&rect, sc->grid[i][j], sc->rlen[i][j], out_points, count);
+			printf("grid search %dx%d    - ", w, h);
+			if (w == 1 && h == 1) hits = findHitsS((Rect*)&rect, sc->grid[i][j], sc->rlen[i][j], out_points, count);
+			else hits = findHitsB(sc, (Rect*)&rect, i, j, w, h, out_points, count);
 			printf("%2d hits, %7d hitchecks\n", hits, hitchecks);
 		} else {
 			method = 3;
@@ -263,10 +322,28 @@ int32_t searchRange(GumpSearchContext* sc, const Rect rect, const int32_t count,
 
 			if (hits < 0) {
 				printf("failure at depth %d - ", -hits);
-				method = 4;
-				if (nx < ny) hits = findHitsU((Rect*)&rect, &sc->xsort[xidxl], nx, out_points, count, isHitY);
-				else hits = findHitsU((Rect*)&rect, &sc->ysort[yidxl], ny, out_points, count, isHitX);
-				printf("%2d hits, %7d hitchecks\n", hits, hitchecks);
+				int maxtests = 0;
+				// Compute maximum number of tests required for grid search
+				printf("BOOM (%d,%d,%d,%d) ", i, j, w, h);
+				for (int a = 0; a < w; a++) {
+					for (int b = 0; b < h; b++) {
+						maxtests += sc->rlen[i+a][j+b];
+					}
+				}
+				printf("SHAKALAKA\n");
+
+				if (maxtests < (nx < ny ? nx : ny)) {
+					method = 4;
+					printf("grid search %dx%d    - ", w, h);
+					if (w == 1 && h == 1) hits = findHitsS((Rect*)&rect, sc->grid[i][j], sc->rlen[i][j], out_points, count);
+					else { printf("ASS\n"); hits = findHitsB(sc, (Rect*)&rect, i, j, w, h, out_points, count); }
+					printf("%2d hits, %7d hitchecks\n", hits, hitchecks);
+				} else {
+					method = 5;
+					if (nx < ny) hits = findHitsU((Rect*)&rect, &sc->xsort[xidxl], nx, out_points, count, isHitY);
+					else hits = findHitsU((Rect*)&rect, &sc->ysort[yidxl], ny, out_points, count, isHitX);
+					printf("%2d hits, %7d hitchecks (w=%d,h=%d)\n", hits, hitchecks, w, h);
+				}
 			}
 		}
 	}
@@ -362,7 +439,6 @@ void freeRange(Range* range, bool left, bool right) {
 
 void buildGrid(GumpSearchContext* sc) {
 	sc->blocki = (int*)calloc(100, sizeof(int));
-	sc->blockr = (int*)calloc(100, sizeof(int));
 	sc->trim = (Rect*)malloc(sizeof(Rect));
 
 	sc->bounds = (Rect*)malloc(sizeof(Rect));
@@ -388,7 +464,7 @@ void buildGrid(GumpSearchContext* sc) {
 		float hx = sc->bounds->lx + (float)(i+1) * sc->dx;
 		int xidxr = xidxl + bsearch(&sc->gridsort[xidxl], true, false, hx, 0, sc->N - xidxl + 1);
 		int nx = xidxr - xidxl + 1;
-		printf("Building vertical grid for x: [%f,%f], %d points, pos [%d,%d]\n", lx, hx, nx, xidxl, xidxr);
+		// printf("Building vertical grid for x: [%f,%f], %d points, pos [%d,%d]\n", lx, hx, nx, xidxl, xidxr);
 		qsort(&sc->gridsort[xidxl], nx, sizeof(Point), ycomp);
 
 		sc->grid[i] = (Point**)calloc(DIVS, sizeof(Point*));
@@ -403,8 +479,8 @@ void buildGrid(GumpSearchContext* sc) {
 			// printf("Building grid element [%d,%d] for y: [%f,%f], %d points, pos [%d,%d]\n", i, j, ly, hy, ny, yidxl, yidxr);
 
 			if (ny == 0) {
-				sc->grid[i][j] = NULL;
 				sc->rlen[i][j] = 0;
+				sc->grid[i][j] = NULL;
 			} else {
 				sc->rlen[i][j] = ny;
 				qsort(&sc->gridsort[yidxl], ny, sizeof(Point), rankcomp);
@@ -420,21 +496,37 @@ void buildGrid(GumpSearchContext* sc) {
 
 		xidxl = xidxr + 1;
 	}
+
+	for (int i = 0; i < DIVS; i++) {
+		for (int j = 0; j < DIVS; j++) {
+			printf("%d results in block [%d,%d]\n", sc->rlen[i][j], i, j);
+		}
+	}
 }
 
 void freeGrid(GumpSearchContext* sc) {
+	printf("free A\n");
+	free(sc->gridsort);
+	printf("free B\n");
 	free(sc->blocki);
-	free(sc->blockr);
-	free(sc->trim);
+	printf("free C\n");
 	for (int i = 0; i < DIVS; i++) {
 		free(sc->grid[i]);
 		free(sc->rlen[i]);
 		free(sc->rect[i]);
 	}
+	printf("free D\n");
 	free(sc->grid);
+	printf("free E\n");
 	free(sc->rlen);
+	printf("free F\n");
 	free(sc->rect);
-	free(sc->gridsort);
+	printf("free G\n");
+	free(sc->bounds);
+	printf("free H\n");
+	free(sc->blocki);
+	printf("free I\n");
+	free(sc->trim);
 }
 
 __stdcall SearchContext* create(const Point* points_begin, const Point* points_end) {
@@ -472,7 +564,10 @@ __stdcall SearchContext* create(const Point* points_begin, const Point* points_e
 __stdcall int32_t search(SearchContext* sc, const Rect rect, const int32_t count, Point* out_points) {
 	GumpSearchContext* context = (GumpSearchContext*)sc;
 	if (context->N == 0) return 0;
-	return searchRange(context, rect, count, out_points);
+	printRect(rect);
+	int hits = searchRange(context, rect, count, out_points);
+	printPoints(out_points, hits);
+	return hits;
 }
 
 __stdcall SearchContext* destroy(SearchContext* sc) {
@@ -482,10 +577,17 @@ __stdcall SearchContext* destroy(SearchContext* sc) {
 		return NULL;
 	}
 
+	printf("free 1\n");
 	free(context->xsort);
+	printf("free 2\n");
 	free(context->ysort);
+	printf("free 3\n");
 	freeRange(context->xroot, true, true);
+	printf("free 4\n");
 	freeRange(context->yroot, true, true);
+	printf("free 5\n");
 	freeGrid(context);
+	printf("free 6\n");
+	free(context);
 	return NULL;
 }

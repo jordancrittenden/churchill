@@ -41,7 +41,6 @@ struct GumpSearchContext {
 	float area;
 	float dx, dy;
 	int* blocki;
-	int* blockr;
 	Rect* trim;
 };
 
