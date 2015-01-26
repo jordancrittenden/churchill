@@ -274,7 +274,7 @@ int32_t rangeHits(GumpSearchContext* sc, const Rect rect, Range* range, int left
 	return hits;
 }
 
-int32_t searchRange(GumpSearchContext* sc, const Rect rect, const int32_t count, Point* out_points) {
+int32_t searchGumption(GumpSearchContext* sc, const Rect rect, const int32_t count, Point* out_points) {
 	int xidxl = bsearch(sc->xsort, true, true, rect.lx, 0, sc->N);
 	int xidxr = bsearch(sc->xsort, true, false, rect.hx, 0, sc->N);
 	int yidxl = bsearch(sc->ysort, false, true, rect.ly, 0, sc->N);
@@ -542,7 +542,7 @@ __stdcall SearchContext* create(const Point* points_begin, const Point* points_e
 __stdcall int32_t search(SearchContext* sc, const Rect rect, const int32_t count, Point* out_points) {
 	GumpSearchContext* context = (GumpSearchContext*)sc;
 	if (context->N == 0) return 0;
-	return searchRange(context, rect, count, out_points);
+	return searchGumption(context, rect, count, out_points);
 }
 
 __stdcall SearchContext* destroy(SearchContext* sc) {
