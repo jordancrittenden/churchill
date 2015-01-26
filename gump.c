@@ -3,7 +3,7 @@
 #include <string.h>
 #include "gump.h"
 
-#define DEBUG 1
+#define DEBUG 0
 #define WRITEFILES 1
 #define SIMPLELIMIT 1000
 #define MAXDEPTH 8 //39062.5
@@ -44,9 +44,6 @@ inline int rankcomp(const void* a, const void* b) {
 
 // HELPER FUNCTIONS -------------------------------------------------------------------------------
 
-int hitchecks = 0;
-int totalhitchecks = 0;
-
 inline float pow(float x, float p) {
 	float y = x;
 	for (int i = 1; i < p; i++) y *= x;
@@ -54,17 +51,14 @@ inline float pow(float x, float p) {
 }
 
 inline bool isHit(Rect* r, Point* p) {
-	hitchecks++;
 	return p->x >= r->lx && p->x <= r->hx && p->y >= r->ly && p->y <= r->hy;
 }
 
 inline bool isHitX(Rect* r, Point* p) {
-	hitchecks++;
 	return p->x >= r->lx && p->x <= r->hx;
 }
 
 inline bool isHitY(Rect* r, Point* p) {
-	hitchecks++;
 	return p->y >= r->ly && p->y <= r->hy;
 }
 
@@ -217,33 +211,19 @@ int32_t searchRange(GumpSearchContext* sc, const Rect rect, const int32_t count,
 
 	if (nx == 0 || ny == 0) return 0;
 
-	hitchecks = 0;
 	int hits = 0;
-	int method = 0;
 
 	if ((nx < ny ? nx : ny) < SIMPLELIMIT) {
-		method = 1;
 		if (nx < ny) hits = findHitsU((Rect*)&rect, &sc->xsort[xidxl], nx, out_points, count, isHitY);
 		else hits = findHitsU((Rect*)&rect, &sc->ysort[yidxl], ny, out_points, count, isHitX);
 	} else {
-		method = 2;
 		if (nx < ny) hits = rangeHits(sc, rect, sc->xroot, xidxl, xidxr, count, out_points, 1);
 		else hits = rangeHits(sc, rect, sc->yroot, yidxl, yidxr, count, out_points, 1);
 
 		if (hits < 0) {
-			printf("failure at depth %d - ", -hits);
-			method = 3;
 			if (nx < ny) hits = findHitsU((Rect*)&rect, &sc->xsort[xidxl], nx, out_points, count, isHitY);
 			else hits = findHitsU((Rect*)&rect, &sc->ysort[yidxl], ny, out_points, count, isHitX);
-			printf("%2d hits, %7d hitchecks (%d from unsorted search)\n", hits, hitchecks, (nx < ny) ? nx : ny);
 		}
-	}
-
-	totalhitchecks += hitchecks;
-	if (WRITEFILES) {
-		FILE *f = fopen("rects.csv", "a");
-		fprintf(f, "%f,%f,%f,%f,%d,%d\n", rect.lx, rect.hx, rect.ly, rect.hy, hitchecks, method);
-		fclose(f);
 	}
 
 	return hits;
@@ -343,15 +323,6 @@ __stdcall SearchContext* create(const Point* points_begin, const Point* points_e
 
 	sc->xroot = buildRange(sc, 0, sc->N-1, selx, true, NULL, NULL, 1);
 	sc->yroot = buildRange(sc, 0, sc->N-1, sely, false, NULL, NULL, 1);
-
-	if (WRITEFILES) {
-		FILE *f = fopen("points.csv", "w");
-		for (int i = 0; i < sc->N; i++) {
-			fprintf(f, "%d,%f,%f\n", sc->ranksort[i].rank, sc->ranksort[i].x, sc->ranksort[i].y);
-		}
-		fclose(f);
-		remove("rects.csv");
-	}
 
 	free(sc->ranksort);
 
