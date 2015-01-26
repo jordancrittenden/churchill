@@ -181,53 +181,53 @@ int32_t findHitsB(GumpSearchContext* sc, Rect* rect, int bx, int by, int w, int 
 	int32_t k = 0;
 
 	printf("shit1 ");
+	int b = 0;
 	for (int i = 0; i < w; i++) {
 		for (int j = 0; j < h; j++) {
-			int b = i*w + j;
+			if (sc->rlen[bx+i][by+j] == 0) continue;
+			sc->blocks[b] = sc->grid[bx+i][by+j];
 			sc->blocki[b] = 0;
+			sc->blockn[b] = sc->rlen[bx+i][by+j];
+			b++;
 		}
 	}
 
+	if (b == 0) return 0;
+	if (b == 1) return findHitsS(rect, sc->blocks[0], sc->blockn[0], out, count);
+
 	printf("shit2\n");
 	int minrank = RANKMAX;
-	int mini = -1, minj = -1;
+	int minb = -1;
 	int fin = 0;
 	while (k < count) {
 		minrank = RANKMAX;
 		fin = 0;
 
 		// find min rank
-		for (int i = 0; i < w; i++) {
-			for (int j = 0; j < h; j++) {
-				int b = i*w + j;
-				printf("Checking length of results for block [%d,%d]\n", bx+i, by+j);
-				int bn = sc->rlen[bx+i][by+j];
-				printf("Block [%d,%d], length %d, index %d\n", i, j, bn, sc->blocki[b]);
-				if (sc->blocki[b] >= bn) { fin++; continue; }
+		for (int i = 0; i < b; i++) {
+			printf("Block %d, length %d, index %d\n", i, sc->blockn[i], sc->blocki[i]);
+			if (sc->blocki[i] >= sc->blockn[i]) { fin++; continue; }
 
-				Point p = sc->grid[bx+i][by+j][sc->blocki[b]];
-				printf("Condsidering rank %d in block [%d,%d] : %d\n", p.rank, i, j, b);
-				if (p.rank < minrank) {
-					mini = i;
-					minj = j;
-					minrank = p.rank;
-				}
+			Point p = sc->blocks[i][sc->blocki[i]];
+			printf("Condsidering rank %d in block %d\n", p.rank, i);
+			if (p.rank < minrank) {
+				minb = i;
+				minrank = p.rank;
 			}
 		}
 
 		// If we've hit the end of all blocks, exit
-		if (fin == w*h) break;
+		if (fin == b) break;
 
-		int bestb = mini*w+minj;
-		printf("Testing best rank %d from block [%d,%d] : %d - ", minrank, mini, minj, bestb);
-		Point bestp = sc->grid[bx+mini][by+minj][sc->blocki[bestb]];
+		printf("Testing best rank %d from block %d - ", minrank, minb);
+		Point bestp = sc->blocks[minb][sc->blocki[minb]];
 		if (isHit(rect, &bestp)) {
 			printf("it's a hit!\n");
 			out[k] = bestp;
 			k++;
 		}
 		else printf("not a hit\n");
-		sc->blocki[bestb]++;
+		sc->blocki[minb]++;
 	}
 
 	return k;
@@ -438,7 +438,9 @@ void freeRange(Range* range, bool left, bool right) {
 }
 
 void buildGrid(GumpSearchContext* sc) {
+	sc->blocks = (Point**)calloc(100, sizeof(Point*));
 	sc->blocki = (int*)calloc(100, sizeof(int));
+	sc->blockn = (int*)calloc(100, sizeof(int));
 	sc->trim = (Rect*)malloc(sizeof(Rect));
 
 	sc->bounds = (Rect*)malloc(sizeof(Rect));
@@ -497,11 +499,15 @@ void buildGrid(GumpSearchContext* sc) {
 		xidxl = xidxr + 1;
 	}
 
+	int total = 0;
 	for (int i = 0; i < DIVS; i++) {
 		for (int j = 0; j < DIVS; j++) {
-			printf("%d results in block [%d,%d]\n", sc->rlen[i][j], i, j);
+			int n = sc->rlen[i][j];
+			total += n;
+			printf("%d results in block [%d,%d]\n", n, i, j);
 		}
 	}
+	printf("%d total\n", total);
 }
 
 void freeGrid(GumpSearchContext* sc) {
@@ -524,7 +530,9 @@ void freeGrid(GumpSearchContext* sc) {
 	printf("free G\n");
 	free(sc->bounds);
 	printf("free H\n");
+	free(sc->blocks);
 	free(sc->blocki);
+	free(sc->blockn);
 	printf("free I\n");
 	free(sc->trim);
 }
