@@ -4,8 +4,8 @@
 #include <math.h>
 #include "gumptionaire.h"
 
-//#define DEBUG 1
-#define WRITEFILES 0
+#define DEBUG 1
+#define WRITEFILES 1
 
 #ifdef DEBUG
 	#define DPRINT(x) printf x
@@ -292,8 +292,10 @@ int32_t searchGumption(GumpSearchContext* sc, const Rect rect, const int32_t cou
 
 	int hits = 0;
 
-	int i = floor((rect.lx - sc->bounds->lx) / sc->dx); if (i < 0) i = 0;
-	int j = floor((rect.ly - sc->bounds->ly) / sc->dy); if (j < 0) j = 0;
+	// find grid block for the bottom left and top right corners of the query rect
+	// subtract small float value to handle cases where bottom left is on a bottom or left grid boundary
+	int i = floor((rect.lx - sc->bounds->lx) / sc->dx - 0.0002f); if (i < 0) i = 0;
+	int j = floor((rect.ly - sc->bounds->ly) / sc->dy - 0.0002f); if (j < 0) j = 0;
 	int p = ceil((rect.hx - sc->bounds->lx) / sc->dx); if (p > DIVS) p = DIVS;
 	int q = ceil((rect.hy - sc->bounds->ly) / sc->dy); if (q > DIVS) q = DIVS;
 	
@@ -477,6 +479,7 @@ void buildGrid(GumpSearchContext* sc) {
 		float hx = sc->bounds->lx + (float)(i+1) * sc->dx;
 		if (i == DIVS - 1) hx = sc->bounds->hx;
 		int xidxr = xidxl + bsearch(&sc->gridsort[xidxl], true, false, hx, 0, sc->N - xidxl + 1);
+		while (sc->gridsort[xidxr].x == sc->gridsort[xidxr+1].x) xidxr++;
 		int nx = xidxr - xidxl + 1;
 		qsort(&sc->gridsort[xidxl], nx, sizeof(Point), ycomp);
 
@@ -489,6 +492,7 @@ void buildGrid(GumpSearchContext* sc) {
 			float hy = sc->bounds->ly + (float)(j+1) * sc->dy;
 			if (j == DIVS - 1) hy = sc->bounds->hy;
 			int yidxr = yidxl + bsearch(&sc->gridsort[yidxl], false, false, hy, 0, xidxr - yidxl + 1);
+			while (sc->gridsort[yidxr].y == sc->gridsort[yidxr+1].y) yidxr++;
 			int ny = yidxr - yidxl + 1;
 
 			if (ny == 0) {
@@ -563,7 +567,10 @@ __stdcall SearchContext* create(const Point* points_begin, const Point* points_e
 __stdcall int32_t search(SearchContext* sc, const Rect rect, const int32_t count, Point* out_points) {
 	GumpSearchContext* context = (GumpSearchContext*)sc;
 	if (context->N == 0) return 0;
-	return searchGumption(context, rect, count, out_points);
+	int hits = searchGumption(context, rect, count, out_points);
+	printRect(rect);
+	printPoints(out_points, hits);
+	return hits;
 }
 
 __stdcall SearchContext* destroy(SearchContext* sc) {
