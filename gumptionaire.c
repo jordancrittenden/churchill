@@ -294,8 +294,13 @@ int32_t searchGumption(GumpSearchContext* sc, const Rect rect, const int32_t cou
 
 	// find grid block for the bottom left and top right corners of the query rect
 	// subtract FLT_MIN to handle cases where bottom left is on a bottom or left grid boundary
-	int i = floor((rect.lx - sc->bounds->lx) / sc->dx); if (i < 0) i = 0;
-	int j = floor((rect.ly - sc->bounds->ly) / sc->dy); if (j < 0) j = 0;
+	// double fi = ((double)rect.lx - (double)sc->bounds->lx) / sc->dx;
+	// double fj = ((double)rect.ly - (double)sc->bounds->ly) / sc->dy;
+	// double fp = ((double)rect.hx - (double)sc->bounds->lx) / sc->dx;
+	// double fq = ((double)rect.hy - (double)sc->bounds->ly) / sc->dy;
+	// printf("%f,%f,%f,%f\n", fi, fj, fp, fq);
+	int i = floor((rect.lx - sc->bounds->lx) / sc->dx - 0.001f); if (i < 0) i = 0;
+	int j = floor((rect.ly - sc->bounds->ly) / sc->dy - 0.001f); if (j < 0) j = 0;
 	int p = ceil((rect.hx - sc->bounds->lx) / sc->dx); if (p > DIVS) p = DIVS;
 	int q = ceil((rect.hy - sc->bounds->ly) / sc->dy); if (q > DIVS) q = DIVS;
 	
@@ -462,8 +467,8 @@ void buildGrid(GumpSearchContext* sc) {
 	sc->bounds->ly = sc->ysort[1].y;
 	sc->bounds->hy = sc->ysort[sc->N-2].y;
 	sc->area = rectArea(sc->bounds);
-	sc->dx = (sc->bounds->hx - sc->bounds->lx) / (double)DIVS;
-	sc->dy = (sc->bounds->hy - sc->bounds->ly) / (double)DIVS;
+	sc->dx = (double)(sc->bounds->hx - sc->bounds->lx) / (double)DIVS;
+	sc->dy = (double)(sc->bounds->hy - sc->bounds->ly) / (double)DIVS;
 	DPRINT(("Bounds are [%f,%f,%f,%f]: dx=%f, dy=%f, area %f\n",
 		sc->bounds->lx, sc->bounds->hx, sc->bounds->ly, sc->bounds->hy,
 		sc->dx, sc->dy, sc->area
@@ -578,7 +583,10 @@ __stdcall SearchContext* create(const Point* points_begin, const Point* points_e
 __stdcall int32_t search(SearchContext* sc, const Rect rect, const int32_t count, Point* out_points) {
 	GumpSearchContext* context = (GumpSearchContext*)sc;
 	if (context->N == 0) return 0;
-	return searchGumption(context, rect, count, out_points);
+	int hits = searchGumption(context, rect, count, out_points);
+	printRect(rect);
+	printPoints(out_points, hits);
+	return hits;
 }
 
 __stdcall SearchContext* destroy(SearchContext* sc) {
