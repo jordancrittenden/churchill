@@ -17,7 +17,7 @@
 #define BASELIMIT 10000
 
 // binary search parameters
-#define BINARYLIMIT 1000
+#define BINARYLIMIT 2500
 
 // range search parameters
 #define MAXDEPTH 8 //39062.5
@@ -25,7 +25,7 @@
 
 // grid search parameters
 #define DIVS 50
-#define GRIDLIMIT 1000
+#define GRIDFACTOR 2.5f
 #define RANKMAX 100000000
 
 
@@ -72,17 +72,17 @@ inline float rectArea(Rect* rect) {
 }
 
 inline bool isHit(Rect* r, Point* p) {
-	hitchecks++;
+	// hitchecks++;
 	return p->x >= r->lx && p->x <= r->hx && p->y >= r->ly && p->y <= r->hy;
 }
 
 inline bool isHitX(Rect* r, Point* p) {
-	hitchecks++;
+	// hitchecks++;
 	return p->x >= r->lx && p->x <= r->hx;
 }
 
 inline bool isHitY(Rect* r, Point* p) {
-	hitchecks++;
+	// hitchecks++;
 	return p->y >= r->ly && p->y <= r->hy;
 }
 
@@ -284,70 +284,91 @@ int32_t searchGumption(GumpSearchContext* sc, const Rect rect, const int32_t cou
 
 	if (nx == 0 || ny == 0) return 0;
 
-	hitchecks = 0;
-	int hits = 0;
-	int method = 0;
+	// short circuit to binary search
+	if ((nx < ny ? nx : ny) < BINARYLIMIT) {
+		if (nx < ny) return findHitsU((Rect*)&rect, &sc->xsort[xidxl], nx, out_points, count, isHitY);
+		else return findHitsU((Rect*)&rect, &sc->ysort[yidxl], ny, out_points, count, isHitX);
+	}
 
-	int i = floor((rect.lx - sc->bounds->lx) / sc->dx);
-	int j = floor((rect.ly - sc->bounds->ly) / sc->dy);
-	int p = ceil((rect.hx - sc->bounds->lx) / sc->dx);
-	int q = ceil((rect.hy - sc->bounds->ly) / sc->dy);
-	if (i < 0) i = 0;
-	if (j < 0) j = 0;
-	if (p > DIVS) p = DIVS;
-	if (q > DIVS) q = DIVS;
+	int hits = 0;
+
+	int i = floor((rect.lx - sc->bounds->lx) / sc->dx); if (i < 0) i = 0;
+	int j = floor((rect.ly - sc->bounds->ly) / sc->dy); if (j < 0) j = 0;
+	int p = ceil((rect.hx - sc->bounds->lx) / sc->dx); if (p > DIVS) p = DIVS;
+	int q = ceil((rect.hy - sc->bounds->ly) / sc->dy); if (q > DIVS) q = DIVS;
+	
 	int w = p - i;
 	int h = q - j;
 
-	// Compute maximum number of tests required for grid search
-	int maxtests = 0;
-	for (int a = 0; a < w; a++) {
-		for (int b = 0; b < h; b++) {
-			maxtests += sc->rlen[i+a][j+b];
-		}
-	}
-
-	if (maxtests < GRIDLIMIT) {
-		DPRINT(("optimistic grid search   - "));
-		if (w == 1 && h == 1) hits = findHitsS((Rect*)&rect, sc->grid[i][j], sc->rlen[i][j], out_points, count);
-		else hits = findHitsB(sc, (Rect*)&rect, i, j, w, h, out_points, count);
-	} else if ((nx < ny ? nx : ny) < BINARYLIMIT) {
-		DPRINT(("optimistic binary search - "));
-		if (nx < ny) hits = findHitsU((Rect*)&rect, &sc->xsort[xidxl], nx, out_points, count, isHitY);
-		else hits = findHitsU((Rect*)&rect, &sc->ysort[yidxl], ny, out_points, count, isHitX);
-	} else if (w == 1 && h == 1) {
-		DPRINT(("single cell grid search  - "));
-		hits = findHitsS((Rect*)&rect, sc->grid[i][j], sc->rlen[i][j], out_points, count);
-	} else {
-		DPRINT(("range search             - "));
-		if (nx < ny) hits = rangeHits(sc, rect, sc->xroot, xidxl, xidxr, count, out_points, 1);
-		else hits = rangeHits(sc, rect, sc->yroot, yidxl, yidxr, count, out_points, 1);
-
-		if (hits < 0) {
-			DPRINT(("failure at depth %d - ", -hits));
-			if (maxtests < (nx < ny ? nx : ny)) {
-				DPRINT(("resolving with grid search - "));
-				if (w == 1 && h == 1) hits = findHitsS((Rect*)&rect, sc->grid[i][j], sc->rlen[i][j], out_points, count);
-				else hits = findHitsB(sc, (Rect*)&rect, i, j, w, h, out_points, count);
-			} else {
-				DPRINT(("resolving with binary search - "));
-				if (nx < ny) hits = findHitsU((Rect*)&rect, &sc->xsort[xidxl], nx, out_points, count, isHitY);
-				else hits = findHitsU((Rect*)&rect, &sc->ysort[yidxl], ny, out_points, count, isHitX);
+	// short circuit to binary or grid search
+	if (w*h <= 4) {
+		// Compute maximum number of tests required for grid search
+		int maxtests = 0;
+		for (int a = 0; a < w; a++) {
+			for (int b = 0; b < h; b++) {
+				maxtests += sc->rlen[i+a][j+b];
 			}
 		}
+
+		if ((float)maxtests * GRIDFACTOR < (float)(nx < ny ? nx : ny)) {
+			return findHitsB(sc, (Rect*)&rect, i, j, w, h, out_points, count);
+		} else {
+			if (nx < ny) return findHitsU((Rect*)&rect, &sc->xsort[xidxl], nx, out_points, count, isHitY);
+			else return findHitsU((Rect*)&rect, &sc->ysort[yidxl], ny, out_points, count, isHitX);
+		}
 	}
 
-	DPRINT(("%2d hits, %7d hitchecks\n", hits, hitchecks));
+	// run range search
+	if (nx < ny) hits = rangeHits(sc, rect, sc->xroot, xidxl, xidxr, count, out_points, 1);
+	else hits = rangeHits(sc, rect, sc->yroot, yidxl, yidxr, count, out_points, 1);
 
-	totalhitchecks += hitchecks;
-	if (WRITEFILES) {
-		FILE *f = fopen("rects.csv", "a");
-		fprintf(f, "%f,%f,%f,%f,%d,%d\n", rect.lx, rect.hx, rect.ly, rect.hy, hitchecks, method);
-		fclose(f);
+	// if range search fails, fall back on grid or binary
+	if (hits < 0) {
+		int maxtests = 0;
+		for (int a = 0; a < w; a++) {
+			for (int b = 0; b < h; b++) {
+				maxtests += sc->rlen[i+a][j+b];
+			}
+		}
+
+		if ((float)maxtests * GRIDFACTOR < (float)(nx < ny ? nx : ny)) {
+			if (w == 1 && h == 1) return findHitsS((Rect*)&rect, sc->grid[i][j], sc->rlen[i][j], out_points, count);
+			else return findHitsB(sc, (Rect*)&rect, i, j, w, h, out_points, count);
+		} else {
+			if (nx < ny) hits = findHitsU((Rect*)&rect, &sc->xsort[xidxl], nx, out_points, count, isHitY);
+			else return findHitsU((Rect*)&rect, &sc->ysort[yidxl], ny, out_points, count, isHitX);
+		}
 	}
 
 	return hits;
 }
+
+// hitchecks = -1;
+// if (w*h < 100) {
+// 	if (w == 1 && h == 1) hits = findHitsS((Rect*)&rect, sc->grid[i][j], sc->rlen[i][j], out_points, count);
+// 	else hits = findHitsB(sc, (Rect*)&rect, i, j, w, h, out_points, count);
+// }
+// int gridchecks = hitchecks;
+
+// hitchecks = 0;
+// if (nx < ny) hits = rangeHits(sc, rect, sc->xroot, xidxl, xidxr, count, out_points, 1);
+// else hits = rangeHits(sc, rect, sc->yroot, yidxl, yidxr, count, out_points, 1);
+// int rangechecks = hits < 0 ? -1 : hitchecks;
+
+// hitchecks = 0;
+// if (nx < ny) hits = findHitsU((Rect*)&rect, &sc->xsort[xidxl], nx, out_points, count, isHitY);
+// else hits = findHitsU((Rect*)&rect, &sc->ysort[yidxl], ny, out_points, count, isHitX);
+// int binarychecks = hitchecks;
+
+// if (WRITEFILES) {
+// 	FILE *f = fopen("rects.csv", "a");
+// 	fprintf(f, "%f,%f,%f,%f,%d,%d,%d,%d,%d,%d,%d,%d\n",
+// 		rect.lx, rect.hx, rect.ly, rect.hy,
+// 		nx, ny, w, h, maxtests,
+// 		gridchecks, rangechecks, binarychecks
+// 	);
+// 	fclose(f);
+// }
 
 
 
