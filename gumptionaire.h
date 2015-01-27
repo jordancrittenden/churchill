@@ -38,8 +38,8 @@ struct GumpSearchContext {
 	Rect** rect;
 	int** rlen;
 	Rect* bounds;
-	float area;
-	float dx, dy;
+	double area;
+	double dx, dy;
 	Point** blocks;
 	int* blocki;
 	int* blockn;

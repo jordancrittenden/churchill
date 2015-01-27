@@ -4,8 +4,8 @@
 #include <math.h>
 #include "gumptionaire.h"
 
-#define DEBUG 1
-#define WRITEFILES 1
+// #define DEBUG 1
+#define WRITEFILES 0
 
 #ifdef DEBUG
 	#define DPRINT(x) printf x
@@ -293,9 +293,9 @@ int32_t searchGumption(GumpSearchContext* sc, const Rect rect, const int32_t cou
 	int hits = 0;
 
 	// find grid block for the bottom left and top right corners of the query rect
-	// subtract small float value to handle cases where bottom left is on a bottom or left grid boundary
-	int i = floor((rect.lx - sc->bounds->lx) / sc->dx - 0.0002f); if (i < 0) i = 0;
-	int j = floor((rect.ly - sc->bounds->ly) / sc->dy - 0.0002f); if (j < 0) j = 0;
+	// subtract FLT_MIN to handle cases where bottom left is on a bottom or left grid boundary
+	int i = floor((rect.lx - sc->bounds->lx) / sc->dx); if (i < 0) i = 0;
+	int j = floor((rect.ly - sc->bounds->ly) / sc->dy); if (j < 0) j = 0;
 	int p = ceil((rect.hx - sc->bounds->lx) / sc->dx); if (p > DIVS) p = DIVS;
 	int q = ceil((rect.hy - sc->bounds->ly) / sc->dy); if (q > DIVS) q = DIVS;
 	
@@ -462,8 +462,8 @@ void buildGrid(GumpSearchContext* sc) {
 	sc->bounds->ly = sc->ysort[1].y;
 	sc->bounds->hy = sc->ysort[sc->N-2].y;
 	sc->area = rectArea(sc->bounds);
-	sc->dx = (sc->bounds->hx - sc->bounds->lx) / (float)DIVS;
-	sc->dy = (sc->bounds->hy - sc->bounds->ly) / (float)DIVS;
+	sc->dx = (sc->bounds->hx - sc->bounds->lx) / (double)DIVS;
+	sc->dy = (sc->bounds->hy - sc->bounds->ly) / (double)DIVS;
 	DPRINT(("Bounds are [%f,%f,%f,%f]: dx=%f, dy=%f, area %f\n",
 		sc->bounds->lx, sc->bounds->hx, sc->bounds->ly, sc->bounds->hy,
 		sc->dx, sc->dy, sc->area
@@ -475,11 +475,10 @@ void buildGrid(GumpSearchContext* sc) {
 	sc->rect = (Rect**)calloc(DIVS, sizeof(Rect*));
 	int xidxl = 0;
 	for (int i = 0; i < DIVS; i++) {
-		float lx = sc->bounds->lx + (float)i * sc->dx;
-		float hx = sc->bounds->lx + (float)(i+1) * sc->dx;
+		double lx = sc->bounds->lx + (double)i * sc->dx;
+		double hx = sc->bounds->lx + (double)(i+1) * sc->dx;
 		if (i == DIVS - 1) hx = sc->bounds->hx;
 		int xidxr = xidxl + bsearch(&sc->gridsort[xidxl], true, false, hx, 0, sc->N - xidxl + 1);
-		while (sc->gridsort[xidxr].x == sc->gridsort[xidxr+1].x) xidxr++;
 		int nx = xidxr - xidxl + 1;
 		qsort(&sc->gridsort[xidxl], nx, sizeof(Point), ycomp);
 
@@ -488,11 +487,10 @@ void buildGrid(GumpSearchContext* sc) {
 		sc->rect[i] = (Rect*)calloc(DIVS, sizeof(Rect));
 		int yidxl = xidxl;
 		for (int j = 0; j < DIVS; j++) {
-			float ly = sc->bounds->ly + (float)j * sc->dy;
-			float hy = sc->bounds->ly + (float)(j+1) * sc->dy;
+			double ly = sc->bounds->ly + (double)j * sc->dy;
+			double hy = sc->bounds->ly + (double)(j+1) * sc->dy;
 			if (j == DIVS - 1) hy = sc->bounds->hy;
 			int yidxr = yidxl + bsearch(&sc->gridsort[yidxl], false, false, hy, 0, xidxr - yidxl + 1);
-			while (sc->gridsort[yidxr].y == sc->gridsort[yidxr+1].y) yidxr++;
 			int ny = yidxr - yidxl + 1;
 
 			if (ny == 0) {
@@ -500,25 +498,36 @@ void buildGrid(GumpSearchContext* sc) {
 				sc->grid[i][j] = NULL;
 			} else {
 				sc->rlen[i][j] = ny;
-				qsort(&sc->gridsort[yidxl], ny, sizeof(Point), rankcomp);
-				sc->grid[i][j] = &sc->gridsort[yidxl];
+				sc->grid[i][j] = (Point*)calloc(ny, sizeof(Point));
+				memcpy(sc->grid[i][j], &sc->gridsort[yidxl], ny * sizeof(Point));
+				qsort(sc->grid[i][j], ny, sizeof(Point), rankcomp);
 			}
 			sc->rect[i][j].lx = lx;
 			sc->rect[i][j].ly = ly;
 			sc->rect[i][j].hx = hx;
 			sc->rect[i][j].hy = hy;
 
-			yidxl = yidxr + 1;
+			// If there are points on the boundary, they need to be included in both grid blocks
+			if (ny > 0 && sc->gridsort[yidxr].y == hx) {
+				yidxl = yidxr;
+				while (sc->gridsort[yidxl].y == sc->gridsort[yidxl-1].y) yidxl--;
+			} else yidxl = yidxr + 1;
 		}
 
-		xidxl = xidxr + 1;
+		// If there are points on the boundary, they need to be included in both grid blocks
+		if (nx > 0 && sc->gridsort[xidxr].x == hx) {
+			xidxl = xidxr;
+			while (sc->gridsort[xidxl].x == sc->gridsort[xidxl-1].x) xidxl--;
+		} else xidxl = xidxr + 1;
 	}
 }
 
 void freeGrid(GumpSearchContext* sc) {
-	free(sc->gridsort);
 	free(sc->blocki);
 	for (int i = 0; i < DIVS; i++) {
+		for (int j = 0; j < DIVS; j++) {
+			free(sc->grid[i][j]);
+		}
 		free(sc->grid[i]);
 		free(sc->rlen[i]);
 		free(sc->rect[i]);
@@ -561,16 +570,15 @@ __stdcall SearchContext* create(const Point* points_begin, const Point* points_e
 		remove("rects.csv");
 	}
 
+	free(sc->gridsort);
+
 	return (SearchContext*)sc;
 }
 
 __stdcall int32_t search(SearchContext* sc, const Rect rect, const int32_t count, Point* out_points) {
 	GumpSearchContext* context = (GumpSearchContext*)sc;
 	if (context->N == 0) return 0;
-	int hits = searchGumption(context, rect, count, out_points);
-	printRect(rect);
-	printPoints(out_points, hits);
-	return hits;
+	return searchGumption(context, rect, count, out_points);
 }
 
 __stdcall SearchContext* destroy(SearchContext* sc) {
