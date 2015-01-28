@@ -14,15 +14,15 @@
 #endif
 
 // rank search parameters
-#define BASELIMIT 10000
+#define BASELIMIT 15000
 
 // binary search parameters
 #define BINARYLIMIT 2500
 
 // region search parameters
-#define MAXDEPTH 8
+#define MAXDEPTH 9
 #define NODESIZE 500
-#define LEAFSIZE 500
+#define LEAFSIZE 600
 
 // grid search parameters
 #define DIVS 50
@@ -272,12 +272,6 @@ int32_t findHitsB(GumpSearchContext* sc, Rect* rect, int bx, int by, int w, int 
 
 // SEARCH IMPLEMENTATIONS -------------------------------------------------------------------------
 
-// baseline search - search full list of points, sorted by rank increasing
-int32_t searchBaseline(GumpSearchContext* sc, const Rect rect, const int32_t count, Point* out_points) {
-	return findHitsS((Rect*)&rect, sc->gridsort, sc->N, out_points, count);
-}
-
-
 // binary search - narrow search to points in x range, y range, and check smaller set
 int32_t searchBinary(GumpSearchContext* sc, const Rect rect, const int32_t count, Point* out_points) {
 	int xidxl = bsearchx(sc->xsort, true, rect.lx, 0, sc->N);
@@ -290,7 +284,7 @@ int32_t searchBinary(GumpSearchContext* sc, const Rect rect, const int32_t count
 	int ny = yidxr - yidxl + 1;
 	if (ny == 0) return 0;
 
-	if ((nx < ny ? nx : ny) > BASELIMIT) return searchBaseline(sc, rect, count, out_points);
+	if ((nx < ny ? nx : ny) > BASELIMIT) return findHitsS((Rect*)&rect, sc->gridsort, sc->N, out_points, count);
 
 	if (nx < ny) return findHitsU((Rect*)&rect, &sc->xsort[xidxl], nx, out_points, count, isHitY);
 	else return findHitsU((Rect*)&rect, &sc->ysort[yidxl], ny, out_points, count, isHitX);
@@ -568,7 +562,9 @@ __stdcall SearchContext* create(const Point* points_begin, const Point* points_e
 	sc->bounds->hy = sc->ysort[sc->N-2].y;
 	sc->area = rectArea(sc->bounds);
 
+	printf("Building region tree\n");
 	sc->root = buildRegion(sc, sc->bounds, NULL, NULL, NULL, NULL, NULL, NULL, 1);
+	printf("Building grid tree\n");
 	buildGrid(sc);
 	free(sc->gridsort);
 
