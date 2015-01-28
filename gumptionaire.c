@@ -105,6 +105,25 @@ int bsearch(Point p[], bool xOrY, bool minOrMax, float v, int imin, int imax) {
 	return minOrMax ? imin : imax;
 }
 
+int bvalsearch(float p[], bool minOrMax, float v, int imin, int imax) {
+	while (imax >= imin) {
+		int imid = (imin + imax) / 2;
+		float val = p[imid];
+		if (val == v) {
+			if (minOrMax) {
+				while (imid > imin && p[imid-1] == v) imid--;
+				return imid;
+			} else {
+				while (imid < imax && p[imid+1] == v) imid++;
+				return imid;
+			}
+		}
+		else if (val < v) imin = imid + 1;
+		else imax = imid - 1;
+	}
+	return minOrMax ? imin : imax;
+}
+
 int32_t findHitsU(Rect* rect, Point* in, int n, Point* out, int count, bool (*hitcheck)(Rect* r, Point* p)) {
 	int i = 0;
 	int hits = 0;
@@ -275,14 +294,15 @@ int32_t rangeHits(GumpSearchContext* sc, const Rect rect, Range* range, int left
 }
 
 int32_t searchGumption(GumpSearchContext* sc, const Rect rect, const int32_t count, Point* out_points) {
-	int xidxl = bsearch(sc->xsort, true, true, rect.lx, 0, sc->N);
-	int xidxr = bsearch(sc->xsort, true, false, rect.hx, 0, sc->N);
-	int yidxl = bsearch(sc->ysort, false, true, rect.ly, 0, sc->N);
-	int yidxr = bsearch(sc->ysort, false, false, rect.hy, 0, sc->N);
+	int xidxl = bvalsearch(sc->xvalsort, true, rect.lx, 0, sc->N);
+	int xidxr = bvalsearch(sc->xvalsort, false, rect.hx, 0, sc->N);
 	int nx = xidxr - xidxl + 1;
-	int ny = yidxr - yidxl + 1;
+	if (nx == 0) return 0;
 
-	if (nx == 0 || ny == 0) return 0;
+	int yidxl = bvalsearch(sc->yvalsort, true, rect.ly, 0, sc->N);
+	int yidxr = bvalsearch(sc->yvalsort, false, rect.hy, 0, sc->N);
+	int ny = yidxr - yidxl + 1;
+	if (ny == 0) return 0;
 
 	// short circuit to binary search
 	if ((nx < ny ? nx : ny) < BINARYLIMIT) {
@@ -553,6 +573,8 @@ __stdcall SearchContext* create(const Point* points_begin, const Point* points_e
 
 	sc->xsort = (Point*)calloc(sc->N, sizeof(Point));
 	sc->ysort = (Point*)calloc(sc->N, sizeof(Point));
+	sc->xvalsort = (float*)calloc(sc->N, sizeof(float));
+	sc->yvalsort = (float*)calloc(sc->N, sizeof(float));
 	sc->gridsort = (Point*)calloc(sc->N, sizeof(Point));
 	memcpy(sc->xsort, points_begin, sc->N * sizeof(Point));
 	memcpy(sc->ysort, points_begin, sc->N * sizeof(Point));
@@ -560,6 +582,11 @@ __stdcall SearchContext* create(const Point* points_begin, const Point* points_e
 	qsort(sc->xsort, sc->N, sizeof(Point), xcomp);
 	qsort(sc->ysort, sc->N, sizeof(Point), ycomp);
 	qsort(sc->gridsort, sc->N, sizeof(Point), rankcomp);
+
+	for (int i = 0; i < sc->N; i++) {
+		sc->xvalsort[i] = sc->xsort[i].x;
+		sc->yvalsort[i] = sc->ysort[i].y;
+	}
 
 	sc->xroot = buildRange(sc, 0, sc->N-1, selx, true, NULL, NULL, 1);
 	sc->yroot = buildRange(sc, 0, sc->N-1, sely, false, NULL, NULL, 1);
@@ -598,6 +625,8 @@ __stdcall SearchContext* destroy(SearchContext* sc) {
 
 	free(context->xsort);
 	free(context->ysort);
+	free(context->xvalsort);
+	free(context->yvalsort);
 	freeRange(context->xroot, true, true);
 	freeRange(context->yroot, true, true);
 	freeGrid(context);
