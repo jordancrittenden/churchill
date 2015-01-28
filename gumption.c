@@ -20,7 +20,7 @@
 #define BINARYLIMIT 2500
 
 // region search parameters
-#define MAXDEPTH 9
+#define MAXDEPTH 8
 #define NODESIZE 500
 #define LEAFSIZE 500
 
@@ -83,16 +83,35 @@ inline bool isHitY(Rect* r, Point* p) {
 	return p->y >= r->ly && p->y <= r->hy;
 }
 
-int bsearch(Point p[], bool xOrY, bool minOrMax, float v, int imin, int imax) {
+int bsearchx(Point p[], bool minOrMax, float v, int imin, int imax) {
 	while (imax >= imin) {
 		int imid = (imin + imax) / 2;
-		float val = xOrY ? p[imid].x : p[imid].y;
+		float val = p[imid].x;
 		if (val == v) {
 			if (minOrMax) {
-				while (imid > imin && (xOrY ? p[imid-1].x : p[imid-1].y) == v) imid--;
+				while (imid > imin && p[imid-1].x == v) imid--;
 				return imid;
 			} else {
-				while (imid < imax && (xOrY ? p[imid+1].x : p[imid+1].y) == v) imid++;
+				while (imid < imax && p[imid+1].x == v) imid++;
+				return imid;
+			}
+		}
+		else if (val < v) imin = imid + 1;
+		else imax = imid - 1;
+	}
+	return minOrMax ? imin : imax;
+}
+
+int bsearchy(Point p[], bool minOrMax, float v, int imin, int imax) {
+	while (imax >= imin) {
+		int imid = (imin + imax) / 2;
+		float val = p[imid].y;
+		if (val == v) {
+			if (minOrMax) {
+				while (imid > imin && p[imid-1].y == v) imid--;
+				return imid;
+			} else {
+				while (imid < imax && p[imid+1].y == v) imid++;
 				return imid;
 			}
 		}
@@ -261,13 +280,13 @@ int32_t searchBaseline(GumpSearchContext* sc, const Rect rect, const int32_t cou
 
 // binary search - narrow search to points in x range, y range, and check smaller set
 int32_t searchBinary(GumpSearchContext* sc, const Rect rect, const int32_t count, Point* out_points) {
-	int xidxl = bvalsearch(sc->xvalsort, true, rect.lx, 0, sc->N);
-	int xidxr = bvalsearch(sc->xvalsort, false, rect.hx, 0, sc->N);
+	int xidxl = bsearchx(sc->xsort, true, rect.lx, 0, sc->N);
+	int xidxr = bsearchx(sc->xsort, false, rect.hx, 0, sc->N);
 	int nx = xidxr - xidxl + 1;
 	if (nx == 0) return 0;
 
-	int yidxl = bvalsearch(sc->yvalsort, true, rect.ly, 0, sc->N);
-	int yidxr = bvalsearch(sc->yvalsort, false, rect.hy, 0, sc->N);
+	int yidxl = bsearchy(sc->ysort, true, rect.ly, 0, sc->N);
+	int yidxr = bsearchy(sc->ysort, false, rect.hy, 0, sc->N);
 	int ny = yidxr - yidxl + 1;
 	if (ny == 0) return 0;
 
@@ -279,6 +298,8 @@ int32_t searchBinary(GumpSearchContext* sc, const Rect rect, const int32_t count
 
 
 int32_t regionHits(GumpSearchContext* sc, Rect rect, Region* region, int count, Point* out_points, int depth) {
+	if (region->n == 0) return 0;
+
 	// if this is a leaf, check it
 	if (region->left == NULL) {
 		int hits = findHitsS((Rect*)&rect, region->ranksort, region->n, out_points, count);
@@ -301,26 +322,6 @@ int32_t regionHits(GumpSearchContext* sc, Rect rect, Region* region, int count, 
 }
 
 int32_t searchGumption(GumpSearchContext* sc, Rect rect, const int32_t count, Point* out_points) {
-	int xidxl = bvalsearch(sc->xvalsort, true, rect.lx, 0, sc->N);
-	int xidxr = bvalsearch(sc->xvalsort, false, rect.hx, 0, sc->N);
-	int nx = xidxr - xidxl + 1;
-	if (nx == 0) return 0;
-
-	int yidxl = bvalsearch(sc->yvalsort, true, rect.ly, 0, sc->N);
-	int yidxr = bvalsearch(sc->yvalsort, false, rect.hy, 0, sc->N);
-	int ny = yidxr - yidxl + 1;
-	if (ny == 0) return 0;
-
-	// short circuit to binary search
-	if ((nx < ny ? nx : ny) < BINARYLIMIT) {
-		if (nx < ny) return findHitsU((Rect*)&rect, &sc->xsort[xidxl], nx, out_points, count, isHitY);
-		else return findHitsU((Rect*)&rect, &sc->ysort[yidxl], ny, out_points, count, isHitX);
-	}
-
-	int hits = 0;
-
-	// find grid block for the bottom left and top right corners of the query rect
-	// subtract FLT_MIN to handle cases where bottom left is on a bottom or left grid boundary
 	sc->trim->lx = rect.lx; sc->trim->hx = rect.hx;
 	sc->trim->ly = rect.ly; sc->trim->hy = rect.hy;
 	if (sc->trim->lx < sc->bounds->lx) sc->trim->lx = sc->bounds->lx;
@@ -329,34 +330,47 @@ int32_t searchGumption(GumpSearchContext* sc, Rect rect, const int32_t count, Po
 	if (sc->trim->hy > sc->bounds->hy) sc->trim->hy = sc->bounds->hy;
 
 	// run range search
-	hits = regionHits(sc, *sc->trim, sc->root, count, out_points, 1);
+	int hits = regionHits(sc, *sc->trim, sc->root, count, out_points, 1);
+	if (hits > 0) return hits;
 
 	// if range search fails, fall back on grid or binary
-	if (hits < 0) {
-		int i = floor((sc->trim->lx - sc->bounds->lx) / sc->dx - 0.001f); if (i < 0) i = 0;
-		int j = floor((sc->trim->ly - sc->bounds->ly) / sc->dy - 0.001f); if (j < 0) j = 0;
-		int p = ceil((sc->trim->hx - sc->bounds->lx) / sc->dx);
-		int q = ceil((sc->trim->hy - sc->bounds->ly) / sc->dy);
-		int w = p - i;
-		int h = q - j;
+	int xidxl = bsearchx(sc->xsort, true, rect.lx, 0, sc->N);
+	int xidxr = bsearchx(sc->xsort, false, rect.hx, 0, sc->N);
+	int nx = xidxr - xidxl + 1;
+	if (nx == 0) return 0;
 
-		int maxtests = 0;
-		for (int a = 0; a < w; a++) {
-			for (int b = 0; b < h; b++) {
-				maxtests += sc->rlen[i+a][j+b];
-			}
-		}
+	int yidxl = bsearchy(sc->ysort, true, rect.ly, 0, sc->N);
+	int yidxr = bsearchy(sc->ysort, false, rect.hy, 0, sc->N);
+	int ny = yidxr - yidxl + 1;
+	if (ny == 0) return 0;
 
-		if ((float)maxtests * GRIDFACTOR < (float)(nx < ny ? nx : ny)) {
-			if (w == 1 && h == 1) return findHitsS((Rect*)&rect, sc->grid[i][j], sc->rlen[i][j], out_points, count);
-			else return findHitsB(sc, (Rect*)&rect, i, j, w, h, out_points, count);
-		} else {
-			if (nx < ny) hits = findHitsU((Rect*)&rect, &sc->xsort[xidxl], nx, out_points, count, isHitY);
-			else return findHitsU((Rect*)&rect, &sc->ysort[yidxl], ny, out_points, count, isHitX);
+	// find grid block for the bottom left and top right corners of the query rect
+	// subtract FLT_MIN to handle cases where bottom left is on a bottom or left grid boundary
+	double di = (double)(sc->trim->lx - sc->bounds->lx) / sc->dx;
+	double dj = (double)(sc->trim->ly - sc->bounds->ly) / sc->dy;
+	double dp = (double)(sc->trim->hx - sc->bounds->lx) / sc->dx;
+	double dq = (double)(sc->trim->hy - sc->bounds->ly) / sc->dy;
+	int i = floor(di - 0.001); if (i < 0) i = 0;
+	int j = floor(dj - 0.001); if (j < 0) j = 0;
+	int p = ceil(dp); if (p > DIVS) p = DIVS;
+	int q = ceil(dq); if (q > DIVS) q = DIVS;
+	int w = p - i;
+	int h = q - j;
+
+	int maxtests = 0;
+	for (int a = 0; a < w; a++) {
+		for (int b = 0; b < h; b++) {
+			maxtests += sc->rlen[i+a][j+b];
 		}
 	}
 
-	return hits;
+	if ((float)maxtests * GRIDFACTOR < (float)(nx < ny ? nx : ny)) {
+		if (w == 1 && h == 1) return findHitsS((Rect*)&rect, sc->grid[i][j], sc->rlen[i][j], out_points, count);
+		else return findHitsB(sc, (Rect*)&rect, i, j, w, h, out_points, count);
+	} else {
+		if (nx < ny) return findHitsU((Rect*)&rect, &sc->xsort[xidxl], nx, out_points, count, isHitY);
+		else return findHitsU((Rect*)&rect, &sc->ysort[yidxl], ny, out_points, count, isHitX);
+	}
 }
 
 // hitchecks = -1;
@@ -469,7 +483,7 @@ void buildGrid(GumpSearchContext* sc) {
 		double lx = sc->bounds->lx + (double)i * sc->dx;
 		double hx = sc->bounds->lx + (double)(i+1) * sc->dx;
 		if (i == DIVS - 1) hx = sc->bounds->hx;
-		int xidxr = xidxl + bsearch(&sc->gridsort[xidxl], true, false, hx, 0, sc->N - xidxl + 1);
+		int xidxr = xidxl + bsearchx(&sc->gridsort[xidxl], false, hx, 0, sc->N - xidxl + 1);
 		int nx = xidxr - xidxl + 1;
 		qsort(&sc->gridsort[xidxl], nx, sizeof(Point), ycomp);
 
@@ -481,7 +495,7 @@ void buildGrid(GumpSearchContext* sc) {
 			double ly = sc->bounds->ly + (double)j * sc->dy;
 			double hy = sc->bounds->ly + (double)(j+1) * sc->dy;
 			if (j == DIVS - 1) hy = sc->bounds->hy;
-			int yidxr = yidxl + bsearch(&sc->gridsort[yidxl], false, false, hy, 0, xidxr - yidxl + 1);
+			int yidxr = yidxl + bsearchy(&sc->gridsort[yidxl], false, hy, 0, xidxr - yidxl + 1);
 			int ny = yidxr - yidxl + 1;
 
 			if (ny == 0) {
@@ -538,8 +552,6 @@ __stdcall SearchContext* create(const Point* points_begin, const Point* points_e
 
 	sc->xsort = (Point*)calloc(sc->N, sizeof(Point));
 	sc->ysort = (Point*)calloc(sc->N, sizeof(Point));
-	sc->xvalsort = (float*)calloc(sc->N, sizeof(float));
-	sc->yvalsort = (float*)calloc(sc->N, sizeof(float));
 	sc->trim = (Rect*)malloc(sizeof(Rect));
 	sc->gridsort = (Point*)calloc(sc->N, sizeof(Point));
 	memcpy(sc->xsort, points_begin, sc->N * sizeof(Point));
@@ -548,11 +560,6 @@ __stdcall SearchContext* create(const Point* points_begin, const Point* points_e
 	qsort(sc->xsort, sc->N, sizeof(Point), xcomp);
 	qsort(sc->ysort, sc->N, sizeof(Point), ycomp);
 	qsort(sc->gridsort, sc->N, sizeof(Point), rankcomp);
-
-	for (int i = 0; i < sc->N; i++) {
-		sc->xvalsort[i] = sc->xsort[i].x;
-		sc->yvalsort[i] = sc->ysort[i].y;
-	}
 
 	sc->bounds = (Rect*)malloc(sizeof(Rect));
 	sc->bounds->lx = sc->xsort[1].x;
@@ -583,8 +590,6 @@ __stdcall SearchContext* destroy(SearchContext* sc) {
 
 	free(context->xsort);
 	free(context->ysort);
-	free(context->xvalsort);
-	free(context->yvalsort);
 	free(context->trim);
 	freeRegion(context->root, true, true, true, true, true, true);
 	freeGrid(context);
