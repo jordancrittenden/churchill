@@ -209,7 +209,7 @@ int32_t findHitsS(Rect* rect, Point* in, int n, Point* out, int count) {
 	int i = 0;
 	while (k < count && i < n) {
 		Point p = in[i];
-		if (isHit(rect, &p)) {
+		if (p.x >= rect->lx && p.x <= rect->hx && p.y >= rect->ly && p.y <= rect->hy) {
 			out[k] = p;
 			k++;
 		}
