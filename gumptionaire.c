@@ -548,7 +548,6 @@ void buildGrid(GumpSearchContext* sc) {
 }
 
 void freeGrid(GumpSearchContext* sc) {
-	free(sc->blocki);
 	for (int i = 0; i < DIVS; i++) {
 		for (int j = 0; j < DIVS; j++) {
 			free(sc->grid[i][j]);

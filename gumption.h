@@ -13,39 +13,42 @@ extern "C" {
 #define DLL_API __declspec(dllimport)
 #endif
 
-struct Range {
-	int l, r;
+struct Region {
+	Rect* rect;
+	int n;
 	Point* ranksort;
-	Range* left;
-	Range* right;
-	Range* mid;
+	Region* left;
+	Region* right;
+	Region* lrmid;
+	Region* bottom;
+	Region* top;
+	Region* btmid;
 };
 
 struct GumpSearchContext {
 	int32_t N;
 
-	// Basic search variables
-	Point* ranksort;
+	// Binary search
+	Point* xsort;
+	Point* ysort;
+	float* xvalsort;
+	float* yvalsort;
 
-	// Grid search variables
-	Point***** grid;
-	Rect**** rect;
-	int**** rlen;
-	Rect* bounds;
-	float dx, dy;
+	// Region search
+	Region* root;
 	Rect* trim;
 
-	// Binary search variables
-	Point* xrank;
-	Point* yrank;
-	float* xsort;
-	float* ysort;
+	// Grid search
+	Point* gridsort;
+	Point*** grid;
+	Rect** rect;
+	int** rlen;
+	Rect* bounds;
+	double area;
+	double dx, dy;
+	Point** blocks;
 	int* blocki;
-	int* blockr;
-
-	// Range search variables
-	Range* xroot;
-	Range* yroot;
+	int* blockn;
 };
 
 SearchContext* __stdcall DLL_API create(const Point* points_begin, const Point* points_end);
