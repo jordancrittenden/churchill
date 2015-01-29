@@ -225,24 +225,8 @@ int32_t findHitsS(Rect* rect, Point* in, int n, Point* out, int count) {
 	return k;
 }
 
-int32_t findHitsB(GumpSearchContext* sc, Rect* rect, int bx, int by, int w, int h, Point* out, int count) {
+int32_t findHitsB(GumpSearchContext* sc, Rect* rect, int b, Point** blocks, int* blocki, int* blockn, Point* out, int count) {
 	int32_t k = 0;
-
-	int b = 0;
-	for (int i = 0; i < w; i++) {
-		for (int j = 0; j < h; j++) {
-			if (sc->rlen[bx+i][by+j] == 0) continue;
-			if (!isRectOverlap(rect, &sc->rect[bx+i][by+j])) continue;
-			sc->blocks[b] = sc->grid[bx+i][by+j];
-			sc->blocki[b] = 0;
-			sc->blockn[b] = sc->rlen[bx+i][by+j];
-			b++;
-		}
-	}
-
-	if (b == 0) return 0;
-	if (b == 1) return findHitsS(rect, sc->blocks[0], sc->blockn[0], out, count);
-
 	int minrank = RANKMAX;
 	int minb = -1;
 	int fin = 0;
@@ -359,18 +343,24 @@ int32_t searchGumption(GumpSearchContext* sc, Rect rect, const int32_t count, Po
 	int h = q - j;
 
 	int maxtests = 0;
+	int blocks = 0;
 	for (int a = 0; a < w; a++) {
 		for (int b = 0; b < h; b++) {
-			if (sc->rlen[a+i][b+j] == 0) continue;
+			int len = sc->rlen[a+i][b+j];
+			if (len == 0) continue;
 			if (!isRectOverlap(&rect, &sc->rect[a+i][b+j])) continue;
-			maxtests += sc->rlen[i+a][j+b];
+			sc->blocks[blocks] = sc->grid[a+i][b+j];
+			sc->blocki[blocks] = 0;
+			sc->blockn[blocks] = len;
+			maxtests += len;
+			blocks++;
 		}
 	}
-	if (maxtests == 0) return 0;
+	if (blocks == 0) return 0;
 
 	if ((float)maxtests * GRIDFACTOR < (float)(nx < ny ? nx : ny)) {
-		if (w == 1 && h == 1) hits = findHitsS((Rect*)&rect, sc->grid[i][j], sc->rlen[i][j], out_points, count);
-		else hits = findHitsB(sc, (Rect*)&rect, i, j, w, h, out_points, count);
+		if (blocks == 1) hits = findHitsS((Rect*)&rect, sc->blocks[0], sc->blockn[0], out_points, count);
+		else hits = findHitsB(sc, (Rect*)&rect, blocks, sc->blocks, sc->blocki, sc->blockn, out_points, count);
 	} else {
 		if (nx < ny) hits = findHitsU((Rect*)&rect, &sc->xsort[xidxl], nx, out_points, count, isHitY);
 		else hits = findHitsU((Rect*)&rect, &sc->ysort[yidxl], ny, out_points, count, isHitX);
@@ -378,33 +368,6 @@ int32_t searchGumption(GumpSearchContext* sc, Rect rect, const int32_t count, Po
 
 	return hits;
 }
-
-// hitchecks = -1;
-// if (w*h < 100) {
-// 	if (w == 1 && h == 1) hits = findHitsS((Rect*)&rect, sc->grid[i][j], sc->rlen[i][j], out_points, count);
-// 	else hits = findHitsB(sc, (Rect*)&rect, i, j, w, h, out_points, count);
-// }
-// int gridchecks = hitchecks;
-
-// hitchecks = 0;
-// if (nx < ny) hits = rangeHits(sc, rect, sc->xroot, xidxl, xidxr, count, out_points, 1);
-// else hits = rangeHits(sc, rect, sc->yroot, yidxl, yidxr, count, out_points, 1);
-// int rangechecks = hits < 0 ? -1 : hitchecks;
-
-// hitchecks = 0;
-// if (nx < ny) hits = findHitsU((Rect*)&rect, &sc->xsort[xidxl], nx, out_points, count, isHitY);
-// else hits = findHitsU((Rect*)&rect, &sc->ysort[yidxl], ny, out_points, count, isHitX);
-// int binarychecks = hitchecks;
-
-// if (WRITEFILES) {
-// 	FILE *f = fopen("rects.csv", "a");
-// 	fprintf(f, "%f,%f,%f,%f,%d,%d,%d,%d,%d,%d,%d,%d\n",
-// 		rect.lx, rect.hx, rect.ly, rect.hy,
-// 		nx, ny, w, h, maxtests,
-// 		gridchecks, rangechecks, binarychecks
-// 	);
-// 	fclose(f);
-// }
 
 
 
