@@ -20,13 +20,13 @@
 #define BINARYLIMIT 2500
 
 // region search parameters
-#define MAXDEPTH 9
+#define MAXDEPTH 8
 #define NODESIZE 500
-#define LEAFSIZE 600
+#define LEAFSIZE 1000
 
 // grid search parameters
 #define DIVS 50
-#define GRIDFACTOR 2.5f
+#define GRIDFACTOR 3.0f
 #define RANKMAX 100000000
 
 // DEBUGGING --------------------------------------------------------------------------------------
@@ -63,6 +63,8 @@ inline int rankcomp(const void* a, const void* b) {
 
 // HELPER FUNCTIONS -------------------------------------------------------------------------------
 
+int hitchecks = 0;
+
 inline float rectArea(Rect* rect) {
 	return (rect->hx - rect->lx) * (rect->hy - rect->ly);
 }
@@ -70,6 +72,10 @@ inline float rectArea(Rect* rect) {
 inline bool isRectInside(Rect* r1, Rect* r2) {
 	return r2->lx >= r1->lx && r2->ly >= r1->ly && r2->hx <= r1->hx && r2->hy <= r1->hy;
 }
+
+ inline bool isRectOverlap(Rect* r1, Rect* r2) {
+ 	return r1->lx < r2->hx && r1->hx > r2->lx && r1->ly < r2->hy && r1->hy > r2->ly;
+ }
 
 inline bool isHit(Rect* r, Point* p) {
 	return p->x >= r->lx && p->x <= r->hx && p->y >= r->ly && p->y <= r->hy;
@@ -226,6 +232,7 @@ int32_t findHitsB(GumpSearchContext* sc, Rect* rect, int bx, int by, int w, int 
 	for (int i = 0; i < w; i++) {
 		for (int j = 0; j < h; j++) {
 			if (sc->rlen[bx+i][by+j] == 0) continue;
+			if (!isRectOverlap(rect, &sc->rect[bx+i][by+j])) continue;
 			sc->blocks[b] = sc->grid[bx+i][by+j];
 			sc->blocki[b] = 0;
 			sc->blockn[b] = sc->rlen[bx+i][by+j];
@@ -309,7 +316,7 @@ int32_t regionHits(GumpSearchContext* sc, Rect rect, Region* region, int count, 
 	if (isRectInside(region->lrmid->rect,  &rect)) return regionHits(sc, rect, region->lrmid,  count, out_points, depth+1);
 	if (isRectInside(region->btmid->rect,  &rect)) return regionHits(sc, rect, region->btmid,  count, out_points, depth+1);
 
-	// if not fully contained in any childre, check self
+	// if not fully contained in any children, check self
 	int hits = findHitsS((Rect*)&rect, region->ranksort, region->n, out_points, count);
 	if (hits < count) return -depth;
 	return hits;
@@ -323,11 +330,11 @@ int32_t searchGumption(GumpSearchContext* sc, Rect rect, const int32_t count, Po
 	if (sc->trim->ly < sc->bounds->ly) sc->trim->ly = sc->bounds->ly;
 	if (sc->trim->hy > sc->bounds->hy) sc->trim->hy = sc->bounds->hy;
 
-	// run range search
+	// run region search
 	int hits = regionHits(sc, *sc->trim, sc->root, count, out_points, 1);
 	if (hits > 0) return hits;
 
-	// if range search fails, fall back on grid or binary
+	// if region search fails, fall back on grid or binary
 	int xidxl = bsearchx(sc->xsort, true, rect.lx, 0, sc->N);
 	int xidxr = bsearchx(sc->xsort, false, rect.hx, 0, sc->N);
 	int nx = xidxr - xidxl + 1;
@@ -354,17 +361,22 @@ int32_t searchGumption(GumpSearchContext* sc, Rect rect, const int32_t count, Po
 	int maxtests = 0;
 	for (int a = 0; a < w; a++) {
 		for (int b = 0; b < h; b++) {
+			if (sc->rlen[a+i][b+j] == 0) continue;
+			if (!isRectOverlap(&rect, &sc->rect[a+i][b+j])) continue;
 			maxtests += sc->rlen[i+a][j+b];
 		}
 	}
+	if (maxtests == 0) return 0;
 
 	if ((float)maxtests * GRIDFACTOR < (float)(nx < ny ? nx : ny)) {
-		if (w == 1 && h == 1) return findHitsS((Rect*)&rect, sc->grid[i][j], sc->rlen[i][j], out_points, count);
-		else return findHitsB(sc, (Rect*)&rect, i, j, w, h, out_points, count);
+		if (w == 1 && h == 1) hits = findHitsS((Rect*)&rect, sc->grid[i][j], sc->rlen[i][j], out_points, count);
+		else hits = findHitsB(sc, (Rect*)&rect, i, j, w, h, out_points, count);
 	} else {
-		if (nx < ny) return findHitsU((Rect*)&rect, &sc->xsort[xidxl], nx, out_points, count, isHitY);
-		else return findHitsU((Rect*)&rect, &sc->ysort[yidxl], ny, out_points, count, isHitX);
+		if (nx < ny) hits = findHitsU((Rect*)&rect, &sc->xsort[xidxl], nx, out_points, count, isHitY);
+		else hits = findHitsU((Rect*)&rect, &sc->ysort[yidxl], ny, out_points, count, isHitX);
 	}
+
+	return hits;
 }
 
 // hitchecks = -1;
@@ -500,11 +512,14 @@ void buildGrid(GumpSearchContext* sc) {
 				sc->grid[i][j] = (Point*)calloc(ny, sizeof(Point));
 				memcpy(sc->grid[i][j], &sc->gridsort[yidxl], ny * sizeof(Point));
 				qsort(sc->grid[i][j], ny, sizeof(Point), rankcomp);
+
+				for (int p = 0; p < ny; p++) {
+					if (p == 0 || sc->grid[i][j][p].x < sc->rect[i][j].lx) sc->rect[i][j].lx = sc->grid[i][j][p].x;
+					if (p == 0 || sc->grid[i][j][p].y < sc->rect[i][j].ly) sc->rect[i][j].ly = sc->grid[i][j][p].y;
+					if (p == 0 || sc->grid[i][j][p].x > sc->rect[i][j].hx) sc->rect[i][j].hx = sc->grid[i][j][p].x;
+					if (p == 0 || sc->grid[i][j][p].y > sc->rect[i][j].hy) sc->rect[i][j].hy = sc->grid[i][j][p].y;
+				}
 			}
-			sc->rect[i][j].lx = lx;
-			sc->rect[i][j].ly = ly;
-			sc->rect[i][j].hx = hx;
-			sc->rect[i][j].hy = hy;
 
 			// If there are points on the boundary, they need to be included in both grid blocks
 			if (ny > 0 && sc->gridsort[yidxr].y == hx) {
