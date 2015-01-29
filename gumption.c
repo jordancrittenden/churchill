@@ -19,7 +19,7 @@
 // region search parameters
 #define MAXDEPTH 8
 #define NODESIZE 500
-#define LEAFSIZE 1000
+#define LEAFSIZE 1500
 
 // grid search parameters
 #define DIVS 50
