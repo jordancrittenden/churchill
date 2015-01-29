@@ -23,7 +23,7 @@
 
 // grid search parameters
 #define DIVS 50
-#define GRIDFACTOR 2.0f
+#define GRIDFACTOR 0.75f
 #define RANKMAX 100000000
 
 // DEBUGGING --------------------------------------------------------------------------------------
