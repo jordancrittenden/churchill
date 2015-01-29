@@ -16,9 +16,6 @@
 // rank search parameters
 #define BASELIMIT 15000
 
-// binary search parameters
-#define BINARYLIMIT 2500
-
 // region search parameters
 #define MAXDEPTH 8
 #define NODESIZE 500
@@ -26,7 +23,7 @@
 
 // grid search parameters
 #define DIVS 50
-#define GRIDFACTOR 3.0f
+#define GRIDFACTOR 2.0f
 #define RANKMAX 100000000
 
 // DEBUGGING --------------------------------------------------------------------------------------
