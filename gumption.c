@@ -17,10 +17,10 @@
 #define BASELIMIT 15000
 
 // region search parameters
-#define MAXDEPTH 9
+#define MAXDEPTH 10
 #define MAXLEAF 150000
 #define NODESIZE 500
-#define LEAFSIZE 1000
+#define LEAFSIZE 1200
 
 // grid search parameters
 #define DIVS 50
@@ -395,6 +395,8 @@ Region* buildRegion(GumpSearchContext* sc, Rect* rect, Region* lover, Region* lr
 	region->ranksort = NULL;
 
 	int est = MAXLEAF;
+	int blocks = -1;
+
 	// only compute point count estimate if deep in tree
 	if (depth >= 8) {
 		double di = (double)(rect->lx - sc->bounds->lx) / sc->dx;
@@ -408,6 +410,7 @@ Region* buildRegion(GumpSearchContext* sc, Rect* rect, Region* lover, Region* lr
 		int w = p - i;
 		int h = q - j;
 
+		blocks = 0;
 		for (int a = 0; a < w; a++) {
 			for (int b = 0; b < h; b++) {
 				int rlen = sc->rlen[a+i][b+j];
@@ -415,13 +418,21 @@ Region* buildRegion(GumpSearchContext* sc, Rect* rect, Region* lover, Region* lr
 				if (!isRectOverlap(rect, &sc->rect[a+i][b+j])) continue;
 				int p = rectOverlapPercent(&sc->rect[a+i][b+j], rect) * rlen;
 				est += p;
+
+				sc->blocks[blocks] = sc->grid[a+i][b+j];
+				sc->blocki[blocks] = 0;
+				sc->blockn[blocks] = rlen;
+				blocks++;
 			}
 		}
 	}
 
 	int len = est < MAXLEAF ? LEAFSIZE : NODESIZE;
 	region->ranksort = (Point*)calloc(len, sizeof(Point));
-	region->n = searchBinary(sc, *rect, len, region->ranksort);
+	if (blocks > 0) {
+		if (blocks == 1) region->n = findHitsS(rect, sc->blocks[0], sc->blockn[0], region->ranksort, len);
+		else region->n = findHitsB(sc, rect, blocks, sc->blocks, sc->blocki, sc->blockn, region->ranksort, len);
+	} else region->n = searchBinary(sc, *rect, len, region->ranksort);
 
 	// is this a leaf
 	if (est < MAXLEAF || depth == MAXDEPTH) return region;

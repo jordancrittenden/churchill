@@ -32,8 +32,6 @@ struct GumpSearchContext {
 	// Binary search
 	Point* xsort;
 	Point* ysort;
-	float* xvalsort;
-	float* yvalsort;
 
 	// Region search
 	Region* root;
