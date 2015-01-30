@@ -377,6 +377,7 @@ Region* buildRegion(GumpSearchContext* sc, Point* ps, int n, Rect* rect, Region*
 	regions++;
 	Region* region = (Region*)malloc(sizeof(Region));
 	region->rect     = rect;
+	region->crect    = NULL;
 	region->left     = NULL;
 	region->right    = NULL;
 	region->lrmid    = NULL;
@@ -416,18 +417,19 @@ Region* buildRegion(GumpSearchContext* sc, Point* ps, int n, Rect* rect, Region*
 	float xq3  = (xmid + rect->hx) / 2;
 	float yq1  = (rect->ly + ymid) / 2;
 	float yq3  = (ymid + rect->hy) / 2;
-	Rect* leftrect   = (Rect*)malloc(sizeof(Rect)); leftrect->lx = rect->lx;   leftrect->hx = xmid;       leftrect->ly = rect->ly;   leftrect->hy = rect->hy;
-	Rect* rightrect  = (Rect*)malloc(sizeof(Rect)); rightrect->lx = xmid;      rightrect->hx = rect->hx;  rightrect->ly = rect->ly;  rightrect->hy = rect->hy;
-	Rect* lrmidrect  = (Rect*)malloc(sizeof(Rect)); lrmidrect->lx = xq1;       lrmidrect->hx = xq3;       lrmidrect->ly = rect->ly;  lrmidrect->hy = rect->hy;
-	Rect* bottomrect = (Rect*)malloc(sizeof(Rect)); bottomrect->lx = rect->lx; bottomrect->hx = rect->hx; bottomrect->ly = rect->ly; bottomrect->hy = ymid;
-	Rect* toprect    = (Rect*)malloc(sizeof(Rect)); toprect->lx = rect->lx;    toprect->hx = rect->hx;    toprect->ly = ymid;        toprect->hy = rect->hy;
-	Rect* btmidrect  = (Rect*)malloc(sizeof(Rect)); btmidrect->lx = rect->lx;  btmidrect->hx = rect->hx;  btmidrect->ly = yq1;       btmidrect->hy = yq3;
-	region->left   = lover  ? lover  : buildRegion(sc, hits, k, leftrect,   NULL, NULL, NULL, NULL, NULL, NULL, depth+1);
-	region->right  = rover  ? rover  : buildRegion(sc, hits, k, rightrect,  NULL, NULL, NULL, NULL, NULL, NULL, depth+1);
-	region->lrmid  = lrover ? lrover : buildRegion(sc, hits, k, lrmidrect,  region->left->right, NULL, region->right->left, NULL, NULL, NULL, depth+1);
-	region->bottom = bover  ? bover  : buildRegion(sc, hits, k, bottomrect, region->left->bottom, region->lrmid->bottom, region->right->bottom, NULL, NULL, NULL, depth+1);
-	region->top    = tover  ? tover  : buildRegion(sc, hits, k, toprect,    region->left->top, region->lrmid->top, region->right->top, NULL, NULL, NULL, depth+1);
-	region->btmid  = btover ? btover : buildRegion(sc, hits, k, btmidrect,  region->left->btmid, region->lrmid->btmid, region->right->btmid, region->bottom->top, NULL, region->top->bottom, depth+1);
+	region->crect = (Rect*)calloc(6, sizeof(Rect));
+	region->crect[0].lx = rect->lx; region->crect[0].hx = xmid;     region->crect[0].ly = rect->ly; region->crect[0].hy = rect->hy;
+	region->crect[1].lx = xmid;     region->crect[1].hx = rect->hx; region->crect[1].ly = rect->ly; region->crect[1].hy = rect->hy;
+	region->crect[2].lx = xq1;      region->crect[2].hx = xq3;      region->crect[2].ly = rect->ly; region->crect[2].hy = rect->hy;
+	region->crect[3].lx = rect->lx; region->crect[3].hx = rect->hx; region->crect[3].ly = rect->ly; region->crect[3].hy = ymid;
+	region->crect[4].lx = rect->lx; region->crect[4].hx = rect->hx; region->crect[4].ly = ymid;     region->crect[4].hy = rect->hy;
+	region->crect[5].lx = rect->lx; region->crect[5].hx = rect->hx; region->crect[5].ly = yq1;      region->crect[5].hy = yq3;
+	region->left   = lover  ? lover  : buildRegion(sc, hits, k, &region->crect[0], NULL, NULL, NULL, NULL, NULL, NULL, depth+1);
+	region->right  = rover  ? rover  : buildRegion(sc, hits, k, &region->crect[1], NULL, NULL, NULL, NULL, NULL, NULL, depth+1);
+	region->lrmid  = lrover ? lrover : buildRegion(sc, hits, k, &region->crect[2], region->left->right, NULL, region->right->left, NULL, NULL, NULL, depth+1);
+	region->bottom = bover  ? bover  : buildRegion(sc, hits, k, &region->crect[3], region->left->bottom, region->lrmid->bottom, region->right->bottom, NULL, NULL, NULL, depth+1);
+	region->top    = tover  ? tover  : buildRegion(sc, hits, k, &region->crect[4], region->left->top, region->lrmid->top, region->right->top, NULL, NULL, NULL, depth+1);
+	region->btmid  = btover ? btover : buildRegion(sc, hits, k, &region->crect[5], region->left->btmid, region->lrmid->btmid, region->right->btmid, region->bottom->top, NULL, region->top->bottom, depth+1);
 
 	free(hits);
 
@@ -441,6 +443,7 @@ void freeRegion(Region* region, bool left, bool lrmid, bool right, bool bottom, 
 	if (bottom && region->bottom) freeRegion(region->bottom, false, false, false, true,  true, true);
 	if (top    && region->top)    freeRegion(region->top,    false, false, false, true,  true, true);
 	if (btmid  && region->btmid)  freeRegion(region->btmid,  false, false, false, false, true, false);
+	if (region->crect) free(region->crect);
 	if (region->ranksort) free(region->ranksort);
 	free(region);
 }

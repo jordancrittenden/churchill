@@ -15,6 +15,7 @@ extern "C" {
 
 struct Region {
 	Rect* rect;
+	Rect* crect;
 	int n;
 	Point* ranksort;
 	Region* left;
