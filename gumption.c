@@ -18,6 +18,7 @@
 
 // region search parameters
 #define MAXDEPTH 8
+#define MAXLEAF 100000
 #define NODESIZE 500
 #define LEAFSIZE 1500
 
@@ -372,7 +373,7 @@ int32_t searchGumption(GumpSearchContext* sc, Rect rect, const int32_t count, Po
 
 int regions = 0;
 
-Region* buildRegion(GumpSearchContext* sc, Rect* rect, Region* lover, Region* lrover, Region* rover, Region* bover, Region* btover, Region* tover, int depth) {
+Region* buildRegion(GumpSearchContext* sc, Point* ps, int n, Rect* rect, Region* lover, Region* lrover, Region* rover, Region* bover, Region* btover, Region* tover, int depth) {
 	regions++;
 	Region* region = (Region*)malloc(sizeof(Region));
 	region->rect     = rect;
@@ -384,15 +385,29 @@ Region* buildRegion(GumpSearchContext* sc, Rect* rect, Region* lover, Region* lr
 	region->btmid    = NULL;
 	region->ranksort = NULL;
 
+	Point* hits = (Point*)calloc(n, sizeof(Point));
+	int k = 0;
+	for (int i = 0; i < n; i++) {
+		if (isHit(rect, &ps[i])) {
+			hits[k] = ps[i];
+			k++;
+		}
+	}
+
 	// is this a leaf
-	if (depth == MAXDEPTH) {
-		region->ranksort = (Point*)calloc(LEAFSIZE, sizeof(Point));
-		region->n = searchBinary(sc, *rect, LEAFSIZE, region->ranksort);
+	if (k < MAXLEAF) {
+		region->n = k < LEAFSIZE ? k : LEAFSIZE;
+		region->ranksort = (Point*)calloc(region->n, sizeof(Point));
+		memcpy(region->ranksort, hits, region->n * sizeof(Point));
+		free(hits);
 		return region;
 	}
 
-	region->ranksort = (Point*)calloc(NODESIZE, sizeof(Point));
-	region->n = searchBinary(sc, *rect, NODESIZE, region->ranksort);
+	region->n = k < NODESIZE ? k : NODESIZE;
+	region->ranksort = (Point*)calloc(region->n, sizeof(Point));
+	memcpy(region->ranksort, hits, region->n * sizeof(Point));
+
+	if (region->n == 0) return region;
 
 	// build child regions
 	float xmid = (rect->lx + rect->hx) / 2;
@@ -407,12 +422,14 @@ Region* buildRegion(GumpSearchContext* sc, Rect* rect, Region* lover, Region* lr
 	Rect* bottomrect = (Rect*)malloc(sizeof(Rect)); bottomrect->lx = rect->lx; bottomrect->hx = rect->hx; bottomrect->ly = rect->ly; bottomrect->hy = ymid;
 	Rect* toprect    = (Rect*)malloc(sizeof(Rect)); toprect->lx = rect->lx;    toprect->hx = rect->hx;    toprect->ly = ymid;        toprect->hy = rect->hy;
 	Rect* btmidrect  = (Rect*)malloc(sizeof(Rect)); btmidrect->lx = rect->lx;  btmidrect->hx = rect->hx;  btmidrect->ly = yq1;       btmidrect->hy = yq3;
-	region->left   = lover  ? lover  : buildRegion(sc, leftrect,   NULL, NULL, NULL, NULL, NULL, NULL, depth+1);
-	region->right  = rover  ? rover  : buildRegion(sc, rightrect,  NULL, NULL, NULL, NULL, NULL, NULL, depth+1);
-	region->lrmid  = lrover ? lrover : buildRegion(sc, lrmidrect,  region->left->right, NULL, region->right->left, NULL, NULL, NULL, depth+1);
-	region->bottom = bover  ? bover  : buildRegion(sc, bottomrect, region->left->bottom, region->lrmid->bottom, region->right->bottom, NULL, NULL, NULL, depth+1);
-	region->top    = tover  ? tover  : buildRegion(sc, toprect,    region->left->top, region->lrmid->top, region->right->top, NULL, NULL, NULL, depth+1);
-	region->btmid  = btover ? btover : buildRegion(sc, btmidrect,  region->left->btmid, region->lrmid->btmid, region->right->btmid, region->bottom->top, NULL, region->top->bottom, depth+1);
+	region->left   = lover  ? lover  : buildRegion(sc, hits, k, leftrect,   NULL, NULL, NULL, NULL, NULL, NULL, depth+1);
+	region->right  = rover  ? rover  : buildRegion(sc, hits, k, rightrect,  NULL, NULL, NULL, NULL, NULL, NULL, depth+1);
+	region->lrmid  = lrover ? lrover : buildRegion(sc, hits, k, lrmidrect,  region->left->right, NULL, region->right->left, NULL, NULL, NULL, depth+1);
+	region->bottom = bover  ? bover  : buildRegion(sc, hits, k, bottomrect, region->left->bottom, region->lrmid->bottom, region->right->bottom, NULL, NULL, NULL, depth+1);
+	region->top    = tover  ? tover  : buildRegion(sc, hits, k, toprect,    region->left->top, region->lrmid->top, region->right->top, NULL, NULL, NULL, depth+1);
+	region->btmid  = btover ? btover : buildRegion(sc, hits, k, btmidrect,  region->left->btmid, region->lrmid->btmid, region->right->btmid, region->bottom->top, NULL, region->top->bottom, depth+1);
+
+	free(hits);
 
 	return region;
 }
@@ -538,7 +555,7 @@ __stdcall SearchContext* create(const Point* points_begin, const Point* points_e
 	sc->area = rectArea(sc->bounds);
 
 	printf("Building region tree\n");
-	sc->root = buildRegion(sc, sc->bounds, NULL, NULL, NULL, NULL, NULL, NULL, 1);
+	sc->root = buildRegion(sc, sc->gridsort, sc->N, sc->bounds, NULL, NULL, NULL, NULL, NULL, NULL, 1);
 	printf("Building grid tree\n");
 	buildGrid(sc);
 	free(sc->gridsort);
