@@ -17,10 +17,10 @@
 #define BASELIMIT 15000
 
 // region search parameters
-#define MAXDEPTH 10
+#define MAXDEPTH 9
 #define MAXLEAF 150000
 #define NODESIZE 500
-#define LEAFSIZE 1200
+#define LEAFSIZE 500
 
 // grid search parameters
 #define DIVS 50
@@ -433,15 +433,15 @@ Region* buildRegion(GumpSearchContext* sc, Rect* rect, Region* lover, Region* lr
 		}
 	}
 
-	int len = est < MAXLEAF ? LEAFSIZE : NODESIZE;
+	bool isleaf = est < MAXLEAF || depth == MAXDEPTH;
+	int len = isleaf ? LEAFSIZE : NODESIZE;
 	region->ranksort = (Point*)calloc(len, sizeof(Point));
 	if (blocks > 0) {
 		if (blocks == 1) region->n = findHitsS(rect, sc->blocks[0], sc->blockn[0], region->ranksort, len);
 		else region->n = findHitsB(sc, rect, blocks, sc->blocks, sc->blocki, sc->blockn, region->ranksort, len);
 	} else region->n = searchBinary(sc, *rect, len, region->ranksort);
 
-	// is this a leaf
-	if (est < MAXLEAF || depth == MAXDEPTH) return region;
+	if (isleaf) return region;
 
 	// build child regions
 	float xmid = (rect->lx + rect->hx) / 2;
