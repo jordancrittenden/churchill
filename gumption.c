@@ -72,7 +72,7 @@ inline bool isRectInside(Rect* r1, Rect* r2) {
 }
 
 inline bool isRectOverlap(Rect* r1, Rect* r2) {
-	return r1->lx < r2->hx && r1->hx > r2->lx && r1->ly < r2->hy && r1->hy > r2->ly;
+	return r1->lx <= r2->hx && r1->hx >= r2->lx && r1->ly <= r2->hy && r1->hy >= r2->ly;
 }
 
 inline bool rectOverlapPercent(Rect* r1, Rect* r2) {
@@ -312,6 +312,7 @@ int32_t regionHits(GumpSearchContext* sc, Rect rect, Region* region, int count, 
 	return hits;
 }
 
+int ngrid = 0, nbin = 0;
 int32_t searchGumption(GumpSearchContext* sc, Rect rect, const int32_t count, Point* out_points) {
 	sc->trim->lx = rect.lx; sc->trim->hx = rect.hx;
 	sc->trim->ly = rect.ly; sc->trim->hy = rect.hy;
@@ -362,12 +363,17 @@ int32_t searchGumption(GumpSearchContext* sc, Rect rect, const int32_t count, Po
 			blocks++;
 		}
 	}
-	if (blocks == 0) return 0;
+	if (blocks == 0) {
+		DPRINT(("Abort - no block overlaps\n"));
+		return 0;
+	}
 
 	if ((float)maxtests * GRIDFACTOR < (float)(nx < ny ? nx : ny)) {
+		DPRINT(("Falling back on grid search (%d)\n", ngrid++));
 		if (blocks == 1) hits = findHitsS((Rect*)&rect, sc->blocks[0], sc->blockn[0], out_points, count);
 		else hits = findHitsB(sc, (Rect*)&rect, blocks, sc->blocks, sc->blocki, sc->blockn, out_points, count);
 	} else {
+		DPRINT(("Falling back on binary search (%d)\n", nbin++));
 		if (nx < ny) hits = findHitsU((Rect*)&rect, &sc->xsort[xidxl], nx, out_points, count, isHitY);
 		else hits = findHitsU((Rect*)&rect, &sc->ysort[yidxl], ny, out_points, count, isHitX);
 	}
@@ -584,10 +590,21 @@ __stdcall SearchContext* create(const Point* points_begin, const Point* points_e
 	sc->bounds->hy = sc->ysort[sc->N-2].y;
 	sc->area = rectArea(sc->bounds);
 
-	printf("Building grid tree\n");
+	DPRINT(("Building grid tree\n"));
 	buildGrid(sc);
-	printf("Building region tree\n");
+	DPRINT(("Building region tree\n"));
 	sc->root = buildRegion(sc, sc->bounds, NULL, NULL, NULL, NULL, NULL, NULL, 1);
+
+	if (WRITEFILES) {
+		DPRINT(("Writing points file\n"));
+		FILE *f = fopen("points.csv", "w");
+		for (int i = 0; i < sc->N; i++) {
+			fprintf(f, "%d,%f,%f\n", sc->gridsort[i].rank, sc->gridsort[i].x, sc->gridsort[i].y);
+		}
+		fclose(f);
+		remove("rects.csv");
+	}
+
 	free(sc->gridsort);
 	free(sc->ranksort);
 
