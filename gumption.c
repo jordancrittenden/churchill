@@ -19,7 +19,7 @@
 // region search parameters
 #define MAXDEPTH 9
 #define MAXLEAF 150000
-#define NODESIZE 500
+#define NODESIZE 400
 #define LEAFSIZE 500
 
 // grid search parameters
@@ -363,6 +363,7 @@ int32_t searchGumption(GumpSearchContext* sc, Rect rect, const int32_t count, Po
 			blocks++;
 		}
 	}
+
 	if (blocks == 0) {
 		DPRINT(("Abort - no block overlaps\n"));
 		return 0;
@@ -377,6 +378,7 @@ int32_t searchGumption(GumpSearchContext* sc, Rect rect, const int32_t count, Po
 		if (nx < ny) hits = findHitsU((Rect*)&rect, &sc->xsort[xidxl], nx, out_points, count, isHitY);
 		else hits = findHitsU((Rect*)&rect, &sc->ysort[yidxl], ny, out_points, count, isHitX);
 	}
+
 
 	return hits;
 }
@@ -480,13 +482,13 @@ void freeRegion(Region* region, bool left, bool lrmid, bool right, bool bottom, 
 }
 
 void buildGrid(GumpSearchContext* sc) {
-	sc->blocks = (Point**)calloc(100, sizeof(Point*));
-	sc->blocki = (int*)calloc(100, sizeof(int));
-	sc->blockn = (int*)calloc(100, sizeof(int));
+	sc->blocks = (Point**)calloc(DIVS*DIVS, sizeof(Point*));
+	sc->blocki = (int*)calloc(DIVS*DIVS, sizeof(int));
+	sc->blockn = (int*)calloc(DIVS*DIVS, sizeof(int));
 
 	sc->dx = (double)(sc->bounds->hx - sc->bounds->lx) / (double)DIVS;
 	sc->dy = (double)(sc->bounds->hy - sc->bounds->ly) / (double)DIVS;
-	DPRINT(("Bounds are [%f,%f,%f,%f]: dx=%f, dy=%f, area %f\n",
+	DPRINT(("Bounds are [%f,%f,%f,%f]: dx = %f, dy = %f, area %f\n",
 		sc->bounds->lx, sc->bounds->hx, sc->bounds->ly, sc->bounds->hy,
 		sc->dx, sc->dy, sc->area
 	));
@@ -515,7 +517,7 @@ void buildGrid(GumpSearchContext* sc) {
 			int yidxr = yidxl + bsearchy(&sc->gridsort[yidxl], false, hy, 0, xidxr - yidxl + 1);
 			int ny = yidxr - yidxl + 1;
 
-			if (ny == 0) {
+			if (ny <= 0) {
 				sc->rlen[i][j] = 0;
 				sc->grid[i][j] = NULL;
 			} else {
@@ -524,6 +526,10 @@ void buildGrid(GumpSearchContext* sc) {
 				memcpy(sc->grid[i][j], &sc->gridsort[yidxl], ny * sizeof(Point));
 				qsort(sc->grid[i][j], ny, sizeof(Point), rankcomp);
 
+				sc->rect[i][j].lx = RANKMAX;
+				sc->rect[i][j].ly = RANKMAX;
+				sc->rect[i][j].hx = -RANKMAX;
+				sc->rect[i][j].hy = -RANKMAX;
 				for (int p = 0; p < ny; p++) {
 					if (p == 0 || sc->grid[i][j][p].x < sc->rect[i][j].lx) sc->rect[i][j].lx = sc->grid[i][j][p].x;
 					if (p == 0 || sc->grid[i][j][p].y < sc->rect[i][j].ly) sc->rect[i][j].ly = sc->grid[i][j][p].y;
@@ -548,6 +554,7 @@ void buildGrid(GumpSearchContext* sc) {
 }
 
 void freeGrid(GumpSearchContext* sc) {
+	DPRINT(("Freeing grid tree\n"));
 	for (int i = 0; i < DIVS; i++) {
 		for (int j = 0; j < DIVS; j++) {
 			free(sc->grid[i][j]);
@@ -570,18 +577,20 @@ __stdcall SearchContext* create(const Point* points_begin, const Point* points_e
 	sc->N = points_end - points_begin;
 	if (sc->N == 0) return (SearchContext*)sc;
 
+	DPRINT(("Allocating and copying memory\n"));
+	sc->trim = (Rect*)malloc(sizeof(Rect));
 	sc->xsort = (Point*)calloc(sc->N, sizeof(Point));
 	sc->ysort = (Point*)calloc(sc->N, sizeof(Point));
-	sc->trim = (Rect*)malloc(sizeof(Rect));
 	sc->ranksort = (Point*)calloc(sc->N, sizeof(Point));
 	sc->gridsort = (Point*)calloc(sc->N, sizeof(Point));
 	memcpy(sc->xsort, points_begin, sc->N * sizeof(Point));
 	memcpy(sc->ysort, points_begin, sc->N * sizeof(Point));
 	memcpy(sc->ranksort, points_begin, sc->N * sizeof(Point));
+
+	DPRINT(("Sorting points\n"));
 	qsort(sc->xsort, sc->N, sizeof(Point), xcomp);
 	qsort(sc->ysort, sc->N, sizeof(Point), ycomp);
 	qsort(sc->ranksort, sc->N, sizeof(Point), rankcomp);
-	memcpy(sc->gridsort, sc->ranksort, sc->N * sizeof(Point));
 
 	sc->bounds = (Rect*)malloc(sizeof(Rect));
 	sc->bounds->lx = sc->xsort[1].x;
