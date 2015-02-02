@@ -41,8 +41,9 @@ struct GumpSearchContext {
 	// Grid search
 	Point* gridsort;
 	Point*** grid;
-	Rect** rect;
-	int** rlen;
+	Rect** grect;
+	Rect** drect;
+	int** dlen;
 	Rect* bounds;
 	double area;
 	double dx, dy;
