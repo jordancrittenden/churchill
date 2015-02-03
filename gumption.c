@@ -3,8 +3,9 @@
 #include <string.h>
 #include <math.h>
 #include "gumption.h"
+#include "iqsort.h"
 
-#define DEBUG 1
+#define DEBUG 0
 #define WRITEFILES 0
 
 #ifdef DEBUG
@@ -17,7 +18,7 @@
 #define BASELIMIT 15000
 
 // region search parameters
-#define MAXDEPTH 8
+#define MAXDEPTH 9
 #define MAXLEAF 175000
 #define NODESIZE 500
 #define LEAFSIZE 500
@@ -55,6 +56,21 @@ inline int ycomp(const void* a, const void* b) {
 
 inline int rankcomp(const void* a, const void* b) {
 	return ((Point*)a)->rank - ((Point*)b)->rank;
+}
+
+void xsort(struct Point *arr, unsigned n) {
+	#define point_x_lt(a,b) ((a)->x < (b)->x)
+	QSORT(struct Point, arr, n, point_x_lt);
+}
+
+void ysort(struct Point *arr, unsigned n) {
+	#define point_y_lt(a,b) ((a)->y < (b)->y)
+	QSORT(struct Point, arr, n, point_y_lt);
+}
+
+void ranksort(struct Point *arr, unsigned n) {
+	#define point_rank_lt(a,b) ((a)->rank < (b)->rank)
+	QSORT(struct Point, arr, n, point_rank_lt);
 }
 
 
@@ -165,7 +181,7 @@ int32_t findHitsU(Rect* rect, Point* in, int n, Point* out, int count, bool (*hi
 				hits++;
 			}
 		}
-		qsort(out, hits, sizeof(Point), rankcomp);
+		ranksort(out, hits);
 		return hits;
 	}
 
@@ -212,7 +228,7 @@ int32_t findHitsU(Rect* rect, Point* in, int n, Point* out, int count, bool (*hi
 		i++;
 	}
 
-	qsort(out, hits, sizeof(Point), rankcomp);
+	ranksort(out, hits);
 	return hits;
 }
 
@@ -512,7 +528,7 @@ void buildGrid(GumpSearchContext* sc) {
 		if (i == DIVS - 1) hx = sc->bounds->hx;
 		int xidxr = xidxl + bsearchx(&sc->gridsort[xidxl], false, hx, 0, sc->N - xidxl + 1);
 		int nx = xidxr - xidxl + 1;
-		qsort(&sc->gridsort[xidxl], nx, sizeof(Point), ycomp);
+		ysort(&sc->gridsort[xidxl], nx);
 
 		sc->grid[i] = (Point**)calloc(DIVS, sizeof(Point*));
 		sc->grect[i] = (Rect*)calloc(DIVS, sizeof(Rect));
@@ -537,7 +553,7 @@ void buildGrid(GumpSearchContext* sc) {
 				sc->dlen[i][j] = ny;
 				sc->grid[i][j] = (Point*)calloc(ny, sizeof(Point));
 				memcpy(sc->grid[i][j], &sc->gridsort[yidxl], ny * sizeof(Point));
-				qsort(sc->grid[i][j], ny, sizeof(Point), rankcomp);
+				ranksort(sc->grid[i][j], ny);
 
 				sc->drect[i][j].lx = RANKMAX;
 				sc->drect[i][j].ly = RANKMAX;
@@ -601,9 +617,9 @@ __stdcall SearchContext* create(const Point* points_begin, const Point* points_e
 	memcpy(sc->ranksort, points_begin, sc->N * sizeof(Point));
 
 	DPRINT(("Sorting points\n"));
-	qsort(sc->xsort, sc->N, sizeof(Point), xcomp);
-	qsort(sc->ysort, sc->N, sizeof(Point), ycomp);
-	qsort(sc->ranksort, sc->N, sizeof(Point), rankcomp);
+	xsort(sc->xsort, sc->N);
+	ysort(sc->ysort, sc->N);
+	ranksort(sc->ranksort, sc->N);
 
 	sc->bounds = (Rect*)malloc(sizeof(Rect));
 	sc->bounds->lx = sc->xsort[1].x;
