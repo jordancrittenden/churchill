@@ -5,7 +5,7 @@
 #include "gumption.h"
 #include "iqsort.h"
 
-#define DEBUG 0
+// #define DEBUG 0
 #define WRITEFILES 0
 
 #ifdef DEBUG
@@ -19,7 +19,7 @@
 
 // region search parameters
 #define MAXDEPTH 9
-#define MAXLEAF 175000
+#define MAXLEAF 100000
 #define NODESIZE 500
 #define LEAFSIZE 500
 
@@ -232,18 +232,18 @@ int32_t findHitsU(Rect* rect, Point* in, int n, Point* out, int count, bool (*hi
 	return hits;
 }
 
-int32_t findHitsS(Rect* rect, Point* in, int n, Point* out, int count) {
+int32_t findHitsS(const Rect* rect, Point* in, int n, Point* out, int count) {
 	int32_t k = 0;
 	int i = 0;
-	while (k < count && i < n) {
+	while (i < n) {
 		Point p = in[i];
 		if (p.x >= rect->lx && p.x <= rect->hx && p.y >= rect->ly && p.y <= rect->hy) {
 			out[k] = p;
 			k++;
+			if (k == count) return k;
 		}
 		i++;
 	}
-
 	return k;
 }
 
