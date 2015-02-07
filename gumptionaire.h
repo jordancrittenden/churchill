@@ -1,6 +1,3 @@
-#ifndef GUMP_H
-#define GUMP_H
-
 #include "point_search.h"
 
 #ifdef __cplusplus
@@ -13,12 +10,27 @@ extern "C" {
 #define DLL_API __declspec(dllimport)
 #endif
 
-struct Range {
-	int l, r;
+struct Points {
+	int n;
+	int8_t* id;
+	int32_t* rank;
+	float* x;
+	float* y;
+};
+
+struct Region {
+	int n;
 	Point* ranksort;
-	Range* left;
-	Range* right;
-	Range* mid;
+
+	Points* rankpoints;
+	Rect* rect;
+	Rect* crect;
+	Region* left;
+	Region* right;
+	Region* lrmid;
+	Region* bottom;
+	Region* top;
+	Region* btmid;
 };
 
 struct GumpSearchContext {
@@ -27,24 +39,28 @@ struct GumpSearchContext {
 	// Binary search
 	Point* xsort;
 	Point* ysort;
-	float* xvalsort;
-	float* yvalsort;
+	Points* xpoints;
+	Points* ypoints;
 
-	// Range search
-	Range* xroot;
-	Range* yroot;
+	// Region search
+	Point* ranksort;
+	Points* rankpoints;
+	Region* root;
+	Rect* trim;
 
 	// Grid search
 	Point* gridsort;
 	Point*** grid;
-	Rect** rect;
-	int** rlen;
+	Points* gridpoints;
+	Points** gridp;
+	Rect** grect;
+	Rect** drect;
+	int** dlen;
 	Rect* bounds;
 	double area;
 	double dx, dy;
-	Point** blocks;
+	Points* blocks;
 	int* blocki;
-	int* blockn;
 };
 
 SearchContext* __stdcall DLL_API create(const Point* points_begin, const Point* points_end);
@@ -53,6 +69,4 @@ SearchContext* __stdcall DLL_API destroy(SearchContext* sc);
 
 #ifdef __cplusplus
 }
-#endif
-
 #endif
