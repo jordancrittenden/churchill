@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
-#include "gumption.h"
+#include "gumptionaire.h"
 #include "iqsort.h"
 
 // #define DEBUG 0
@@ -247,6 +247,28 @@ int32_t findHitsS(const Rect* rect, Point* in, int n, Point* out, int count) {
 	return k;
 }
 
+int32_t findHitsV(const Rect* rect, bool* restrict ishit, int8_t* restrict ids, int32_t* restrict ranks, float* restrict xs, float* restrict ys, int n, Point* restrict out, int count) {
+	bool* hit     = (bool*)__builtin_assume_aligned(ishit, 16);
+	int8_t* id    = (int8_t*)__builtin_assume_aligned(ids, 16);
+	int32_t* rank = (int32_t*)__builtin_assume_aligned(ranks, 16);
+	float* x      = (float*)__builtin_assume_aligned(xs, 16);
+	float* y      = (float*)__builtin_assume_aligned(ys, 16);
+	#pragma vector always
+	for (int i = 0; i < n; i++) {
+		hit[i] = x[i] >= rect->lx && x[i] <= rect->hx && y[i] >= rect->ly && y[i] <= rect->hy;
+	}
+	int32_t k = 0;
+	for (int i = 0; i < n; i++) {
+		if (hit[i]) {
+			out[k].id = id[i];
+			out[k].rank = rank[i];
+			k++;
+			if (k == count) return k;
+		}
+	}
+	return k;
+}
+
 int32_t findHitsB(GumpSearchContext* sc, Rect* rect, int b, Point** blocks, int* blocki, int* blockn, Point* out, int count) {
 	int32_t k = 0;
 	int minrank = RANKMAX;
@@ -315,7 +337,8 @@ int32_t regionHits(GumpSearchContext* sc, Rect rect, Region* region, int count, 
 
 	// if this is a leaf, check it
 	if (region->left == NULL) {
-		int hits = findHitsS((Rect*)&rect, region->ranksort, region->n, out_points, count);
+		Points* p = region->rankpoints;
+		int hits = findHitsV((Rect*)&rect, sc->ishit, p->id, p->rank, p->x, p->y, p->n, out_points, count);
 		if (hits < count) return -depth;
 		return hits;
 	}
@@ -329,7 +352,8 @@ int32_t regionHits(GumpSearchContext* sc, Rect rect, Region* region, int count, 
 	if (isRectInside(region->btmid->rect,  &rect)) return regionHits(sc, rect, region->btmid,  count, out_points, depth+1);
 
 	// if not fully contained in any children, check self
-	int hits = findHitsS((Rect*)&rect, region->ranksort, region->n, out_points, count);
+	Points* p = region->rankpoints;
+	int hits = findHitsV((Rect*)&rect, sc->ishit, p->id, p->rank, p->x, p->y, p->n, out_points, count);
 	if (hits < count) return -depth;
 	return hits;
 }
@@ -408,6 +432,57 @@ int32_t searchGumption(GumpSearchContext* sc, Rect rect, const int32_t count, Po
 // DLL IMPLEMENTATION -----------------------------------------------------------------------------
 
 int regions = 0;
+
+Points* buildPoints(int n) {
+	Points* p = (Points*)malloc(sizeof(Points));
+	p->n    = n;
+	p->id   = (int8_t*)calloc(n, sizeof(int8_t));
+	p->rank = (int32_t*)calloc(n, sizeof(int32_t));
+	p->x    = (float*)calloc(n, sizeof(float));
+	p->y    = (float*)calloc(n, sizeof(float));
+	return p;
+}
+
+Points* copyPoints(Points* src) {
+	Points* p = (Points*)malloc(sizeof(Points));
+	p->n    = src->n;
+	p->id   = (int8_t*)calloc(src->n, sizeof(int8_t));
+	p->rank = (int32_t*)calloc(src->n, sizeof(int32_t));
+	p->x    = (float*)calloc(src->n, sizeof(float));
+	p->y    = (float*)calloc(src->n, sizeof(float));
+	memcpy(p->id,   src->id,   p->n * sizeof(int8_t));
+	memcpy(p->rank, src->rank, p->n * sizeof(int32_t));
+	memcpy(p->x,    src->x,    p->n * sizeof(float));
+	memcpy(p->y,    src->y,    p->n * sizeof(float));
+	return p;
+}
+
+void fillPoints(Points* p, Point* arr, int n) {
+	for (int i = 0; i < n; i++) {
+		p->id[i]   = arr[i].id;
+		p->rank[i] = arr[i].rank;
+		p->x[i]    = arr[i].x;
+		p->y[i]    = arr[i].y;
+	}
+}
+
+void fillPointArr(Point* arr, Points* p) {
+	for (int i = 0; i < p->n; i++) {
+		arr[i].id   = p->id[i];
+		arr[i].rank = p->rank[i];
+		arr[i].x    = p->x[i];
+		arr[i].y    = p->y[i];
+	}
+}
+
+void freePoints(Points* p) {
+	free(p->id);
+	free(p->rank);
+	free(p->x);
+	free(p->y);
+	free(p);
+	p = NULL;
+}
 
 Region* buildRegion(GumpSearchContext* sc, Rect* rect, Region* lover, Region* lrover, Region* rover, Region* bover, Region* btover, Region* tover, int depth) {
 	regions++;
@@ -492,6 +567,20 @@ Region* buildRegion(GumpSearchContext* sc, Rect* rect, Region* lover, Region* lr
 	return region;
 }
 
+void convertRegion(Region* region, bool left, bool lrmid, bool right, bool bottom, bool btmid, bool top) {
+	region->rankpoints = buildPoints(region->n);
+	fillPoints(region->rankpoints, region->ranksort, region->n);
+	free(region->ranksort);
+	region->ranksort = NULL;
+
+	if (left   && region->left)   convertRegion(region->left,   true,  true,  true,  true,  true, true);
+	if (right  && region->right)  convertRegion(region->right,  true,  true,  true,  true,  true, true);
+	if (lrmid  && region->lrmid)  convertRegion(region->lrmid,  false, true,  false, true,  true, true);
+	if (bottom && region->bottom) convertRegion(region->bottom, false, false, false, true,  true, true);
+	if (top    && region->top)    convertRegion(region->top,    false, false, false, true,  true, true);
+	if (btmid  && region->btmid)  convertRegion(region->btmid,  false, false, false, false, true, false);
+}
+
 void freeRegion(Region* region, bool left, bool lrmid, bool right, bool bottom, bool btmid, bool top) {
 	if (left   && region->left)   freeRegion(region->left,   true,  true,  true,  true,  true, true);
 	if (right  && region->right)  freeRegion(region->right,  true,  true,  true,  true,  true, true);
@@ -500,7 +589,7 @@ void freeRegion(Region* region, bool left, bool lrmid, bool right, bool bottom, 
 	if (top    && region->top)    freeRegion(region->top,    false, false, false, true,  true, true);
 	if (btmid  && region->btmid)  freeRegion(region->btmid,  false, false, false, false, true, false);
 	if (region->crect) free(region->crect);
-	if (region->ranksort) free(region->ranksort);
+	if (region->rankpoints) freePoints(region->rankpoints);
 	free(region);
 }
 
@@ -632,19 +721,16 @@ __stdcall SearchContext* create(const Point* points_begin, const Point* points_e
 	buildGrid(sc);
 	DPRINT(("Building region tree\n"));
 	sc->root = buildRegion(sc, sc->bounds, NULL, NULL, NULL, NULL, NULL, NULL, 1);
-
-	if (WRITEFILES) {
-		DPRINT(("Writing points file\n"));
-		FILE *f = fopen("points.csv", "w");
-		for (int i = 0; i < sc->N; i++) {
-			fprintf(f, "%d,%f,%f\n", sc->gridsort[i].rank, sc->gridsort[i].x, sc->gridsort[i].y);
-		}
-		fclose(f);
-		remove("rects.csv");
-	}
-
+	sc->ishit = (bool*)calloc(LEAFSIZE, sizeof(bool));
 	free(sc->gridsort);
 	free(sc->ranksort);
+
+	// convert array of stuctures pattern to structure of arrays pattern
+	// sc->xpoints = buildPoints(sc->N); fillPoints(sc->xpoints, sc->xsort, sc->N);
+	// sc->ypoints = buildPoints(sc->N); fillPoints(sc->ypoints, sc->ysort, sc->N);
+	// free(sc->xsort);
+	// free(sc->ysort);
+	convertRegion(sc->root, true, true, true, true, true, true);
 
 	return (SearchContext*)sc;
 }
@@ -652,10 +738,7 @@ __stdcall SearchContext* create(const Point* points_begin, const Point* points_e
 __stdcall int32_t search(SearchContext* sc, Rect rect, const int32_t count, Point* out_points) {
 	GumpSearchContext* context = (GumpSearchContext*)sc;
 	if (context->N == 0) return 0;
-	int hits = searchGumption(context, rect, count, out_points);
-	// printRect(rect);
-	// printPoints(out_points, hits);
-	return hits;
+	return searchGumption(context, rect, count, out_points);
 }
 
 __stdcall SearchContext* destroy(SearchContext* sc) {
@@ -669,6 +752,7 @@ __stdcall SearchContext* destroy(SearchContext* sc) {
 	free(context->ysort);
 	free(context->trim);
 	freeRegion(context->root, true, true, true, true, true, true);
+	free(context->ishit);
 	freeGrid(context);
 	free(context);
 	return NULL;

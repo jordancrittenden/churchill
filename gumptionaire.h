@@ -44,23 +44,23 @@ struct GumpSearchContext {
 
 	// Region search
 	Point* ranksort;
-	Points* rankpoints;
 	Region* root;
 	Rect* trim;
+	bool* ishit;
 
 	// Grid search
 	Point* gridsort;
 	Point*** grid;
-	Points* gridpoints;
-	Points** gridp;
+	Points** gridpoints;
 	Rect** grect;
 	Rect** drect;
 	int** dlen;
 	Rect* bounds;
 	double area;
 	double dx, dy;
-	Points* blocks;
+	Point** blocks;
 	int* blocki;
+	int* blockn;
 };
 
 SearchContext* __stdcall DLL_API create(const Point* points_begin, const Point* points_end);
