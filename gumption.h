@@ -1,6 +1,3 @@
-#ifndef GUMP_H
-#define GUMP_H
-
 #include "point_search.h"
 
 #ifdef __cplusplus
@@ -58,6 +55,4 @@ SearchContext* __stdcall DLL_API destroy(SearchContext* sc);
 
 #ifdef __cplusplus
 }
-#endif
-
 #endif
