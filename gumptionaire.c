@@ -247,19 +247,14 @@ int32_t findHitsS(const Rect* rect, Point* in, int n, Point* out, int count) {
 	return k;
 }
 
-int32_t findHitsV(const Rect* rect, bool* restrict ishit, int8_t* restrict ids, int32_t* restrict ranks, float* restrict xs, float* restrict ys, int n, Point* restrict out, int count) {
-	bool* hit     = (bool*)__builtin_assume_aligned(ishit, 16);
+int32_t findHitsV(const Rect* rect, int8_t* restrict ids, int32_t* restrict ranks, float* restrict xs, float* restrict ys, int n, Point* restrict out, int count) {
 	int8_t* id    = (int8_t*)__builtin_assume_aligned(ids, 16);
 	int32_t* rank = (int32_t*)__builtin_assume_aligned(ranks, 16);
 	float* x      = (float*)__builtin_assume_aligned(xs, 16);
 	float* y      = (float*)__builtin_assume_aligned(ys, 16);
-	#pragma vector always
-	for (int i = 0; i < n; i++) {
-		hit[i] = x[i] >= rect->lx && x[i] <= rect->hx && y[i] >= rect->ly && y[i] <= rect->hy;
-	}
 	int32_t k = 0;
 	for (int i = 0; i < n; i++) {
-		if (hit[i]) {
+		if (x[i] >= rect->lx && x[i] <= rect->hx && y[i] >= rect->ly && y[i] <= rect->hy) {
 			out[k].id = id[i];
 			out[k].rank = rank[i];
 			k++;
@@ -284,13 +279,18 @@ int32_t findHitsB(GumpSearchContext* sc, Rect* rect, int b, Point** blocks, int*
 			if (sc->blocki[i] >= sc->blockn[i]) { fin++; continue; }
 
 			Point p = sc->blocks[i][sc->blocki[i]];
-			if (p.rank == prank) {
-				sc->blocki[i]++;
-				p = sc->blocks[i][sc->blocki[i]];
-			}
 			if (p.rank < minrank) {
-				minb = i;
-				minrank = p.rank;
+				if (p.rank == prank) {
+					sc->blocki[i]++;
+					p = sc->blocks[i][sc->blocki[i]];
+					if (p.rank < minrank) {
+						minb = i;
+						minrank = p.rank;
+					}
+				} else {
+					minb = i;
+					minrank = p.rank;
+				}
 			}
 		}
 
@@ -338,7 +338,7 @@ int32_t regionHits(GumpSearchContext* sc, Rect rect, Region* region, int count, 
 	// if this is a leaf, check it
 	if (region->left == NULL) {
 		Points* p = region->rankpoints;
-		int hits = findHitsV((Rect*)&rect, sc->ishit, p->id, p->rank, p->x, p->y, p->n, out_points, count);
+		int hits = findHitsV((Rect*)&rect, p->id, p->rank, p->x, p->y, p->n, out_points, count);
 		if (hits < count) return -depth;
 		return hits;
 	}
@@ -353,12 +353,11 @@ int32_t regionHits(GumpSearchContext* sc, Rect rect, Region* region, int count, 
 
 	// if not fully contained in any children, check self
 	Points* p = region->rankpoints;
-	int hits = findHitsV((Rect*)&rect, sc->ishit, p->id, p->rank, p->x, p->y, p->n, out_points, count);
+	int hits = findHitsV((Rect*)&rect, p->id, p->rank, p->x, p->y, p->n, out_points, count);
 	if (hits < count) return -depth;
 	return hits;
 }
 
-int ngrid = 0, nbin = 0;
 int32_t searchGumption(GumpSearchContext* sc, Rect rect, const int32_t count, Point* out_points) {
 	sc->trim->lx = rect.lx; sc->trim->hx = rect.hx;
 	sc->trim->ly = rect.ly; sc->trim->hy = rect.hy;
@@ -367,9 +366,16 @@ int32_t searchGumption(GumpSearchContext* sc, Rect rect, const int32_t count, Po
 	if (sc->trim->ly < sc->bounds->ly) sc->trim->ly = sc->bounds->ly;
 	if (sc->trim->hy > sc->bounds->hy) sc->trim->hy = sc->bounds->hy;
 
-	// run region search
-	int hits = regionHits(sc, *sc->trim, sc->root, count, out_points, 1);
-	if (hits > 0) return hits;
+	float wpct = (sc->trim->hx - sc->trim->lx) / sc->dx;
+	float hpct = (sc->trim->hy - sc->trim->ly) / sc->dy;
+	float apct = wpct * hpct;
+
+	int hits = 0;
+	// Don't run region search if likely to fail
+	if (apct > 2.5f) {
+		hits = regionHits(sc, *sc->trim, sc->root, count, out_points, 1);
+		if (hits > 0) return hits;
+	}
 
 	// if region search fails, fall back on grid or binary
 	int xidxl = bsearchx(sc->xsort, true, rect.lx, 0, sc->N);
@@ -721,7 +727,6 @@ __stdcall SearchContext* create(const Point* points_begin, const Point* points_e
 	buildGrid(sc);
 	DPRINT(("Building region tree\n"));
 	sc->root = buildRegion(sc, sc->bounds, NULL, NULL, NULL, NULL, NULL, NULL, 1);
-	sc->ishit = (bool*)calloc(LEAFSIZE, sizeof(bool));
 	free(sc->gridsort);
 	free(sc->ranksort);
 
@@ -752,7 +757,6 @@ __stdcall SearchContext* destroy(SearchContext* sc) {
 	free(context->ysort);
 	free(context->trim);
 	freeRegion(context->root, true, true, true, true, true, true);
-	free(context->ishit);
 	freeGrid(context);
 	free(context);
 	return NULL;

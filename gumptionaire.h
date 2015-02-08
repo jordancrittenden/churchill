@@ -46,7 +46,6 @@ struct GumpSearchContext {
 	Point* ranksort;
 	Region* root;
 	Rect* trim;
-	bool* ishit;
 
 	// Grid search
 	Point* gridsort;
