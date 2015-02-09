@@ -15,7 +15,7 @@
 #endif
 
 // rank search parameters
-#define BASELIMIT 15000
+#define BASELIMIT 1000000
 
 // region search parameters
 #define MAXDEPTH 9
