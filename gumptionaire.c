@@ -5,7 +5,7 @@
 #include "gumptionaire.h"
 #include "iqsort.h"
 
-// #define DEBUG 0
+#define DEBUG 0
 #define WRITEFILES 0
 
 #ifdef DEBUG
@@ -18,10 +18,10 @@
 #define BASELIMIT 1000000
 
 // region search parameters
-#define MAXDEPTH 9
-#define MAXLEAF 100000
-#define NODESIZE 500
-#define LEAFSIZE 600
+#define MAXDEPTH 10
+#define MAXLEAF 50000
+#define NODESIZE 400
+#define LEAFSIZE 400
 
 // grid search parameters
 #define DIVS 150
@@ -628,21 +628,22 @@ void freePoints(Points* p) {
 Region* buildRegion(GumpSearchContext* sc, Rect* rect, Region* lover, Region* lrover, Region* rover, Region* bover, Region* btover, Region* tover, int depth) {
 	regions++;
 	Region* region = (Region*)malloc(sizeof(Region));
-	region->rect     = rect;
-	region->crect    = NULL;
-	region->left     = NULL;
-	region->right    = NULL;
-	region->lrmid    = NULL;
-	region->bottom   = NULL;
-	region->top      = NULL;
-	region->btmid    = NULL;
-	region->ranksort = NULL;
+	region->rect       = rect;
+	region->crect      = NULL;
+	region->left       = NULL;
+	region->right      = NULL;
+	region->lrmid      = NULL;
+	region->bottom     = NULL;
+	region->top        = NULL;
+	region->btmid      = NULL;
+	region->ranksort   = NULL;
+	region->rankpoints = NULL;
 
 	int est = MAXLEAF;
 	int blocks = -1;
 
 	// only compute point count estimate if deep in tree
-	if (depth >= 8) {
+	if (depth >= 6) {
 		double di = (double)(rect->lx - sc->bounds->lx) / sc->dx;
 		double dj = (double)(rect->ly - sc->bounds->ly) / sc->dy;
 		double dp = (double)(rect->hx - sc->bounds->lx) / sc->dx;
@@ -658,13 +659,13 @@ Region* buildRegion(GumpSearchContext* sc, Rect* rect, Region* lover, Region* lr
 		if (rect->ly < sc->grect[i][j].ly) j--;
 
 		blocks = 0;
+		est = 0;
 		for (int a = 0; a < w; a++) {
 			for (int b = 0; b < h; b++) {
 				int dlen = sc->dlen[a+i][b+j];
 				if (dlen == 0) continue;
 				if (!isRectOverlap(rect, &sc->drect[a+i][b+j])) continue;
-				int p = rectOverlapPercent(&sc->drect[a+i][b+j], rect) * dlen;
-				est += p;
+				est += dlen;
 
 				sc->blocks[blocks] = sc->grid[a+i][b+j];
 				sc->blocki[blocks] = 0;
@@ -675,6 +676,7 @@ Region* buildRegion(GumpSearchContext* sc, Rect* rect, Region* lover, Region* lr
 	}
 
 	bool isleaf = est < MAXLEAF || depth == MAXDEPTH;
+
 	int len = isleaf ? LEAFSIZE : NODESIZE;
 	region->ranksort = (Point*)calloc(len, sizeof(Point));
 	if (blocks > 0) {
@@ -685,12 +687,12 @@ Region* buildRegion(GumpSearchContext* sc, Rect* rect, Region* lover, Region* lr
 	if (isleaf) return region;
 
 	// build child regions
-	float xmid = (rect->lx + rect->hx) / 2;
-	float ymid = (rect->ly + rect->hy) / 2;
-	float xq1  = (rect->lx + xmid) / 2;
-	float xq3  = (xmid + rect->hx) / 2;
-	float yq1  = (rect->ly + ymid) / 2;
-	float yq3  = (ymid + rect->hy) / 2;
+	double xmid = ((double)rect->lx + (double)rect->hx) / 2;
+	double ymid = ((double)rect->ly + (double)rect->hy) / 2;
+	double xq1  = ((double)rect->lx + (double)xmid)     / 2;
+	double xq3  = ((double)xmid     + (double)rect->hx) / 2;
+	double yq1  = ((double)rect->ly + (double)ymid)     / 2;
+	double yq3  = ((double)ymid     + (double)rect->hy) / 2;
 	region->crect = (Rect*)calloc(6, sizeof(Rect));
 	region->crect[0].lx = rect->lx; region->crect[0].hx = xmid;     region->crect[0].ly = rect->ly; region->crect[0].hy = rect->hy;
 	region->crect[1].lx = xmid;     region->crect[1].hx = rect->hx; region->crect[1].ly = rect->ly; region->crect[1].hy = rect->hy;
@@ -708,18 +710,20 @@ Region* buildRegion(GumpSearchContext* sc, Rect* rect, Region* lover, Region* lr
 	return region;
 }
 
-void convertRegion(Region* region, bool left, bool lrmid, bool right, bool bottom, bool btmid, bool top) {
+void convertRegion(Region* region) {
+	if (region->rankpoints != NULL) return; // This region has already been converted
+
 	region->rankpoints = buildPoints(region->n);
 	fillPoints(region->rankpoints, region->ranksort, region->n);
 	free(region->ranksort);
 	region->ranksort = NULL;
 
-	if (left   && region->left)   convertRegion(region->left,   true,  true,  true,  true,  true, true);
-	if (right  && region->right)  convertRegion(region->right,  true,  true,  true,  true,  true, true);
-	if (lrmid  && region->lrmid)  convertRegion(region->lrmid,  false, true,  false, true,  true, true);
-	if (bottom && region->bottom) convertRegion(region->bottom, false, false, false, true,  true, true);
-	if (top    && region->top)    convertRegion(region->top,    false, false, false, true,  true, true);
-	if (btmid  && region->btmid)  convertRegion(region->btmid,  false, false, false, false, true, false);
+	if (region->left)   convertRegion(region->left);
+	if (region->right)  convertRegion(region->right);
+	if (region->lrmid)  convertRegion(region->lrmid);
+	if (region->bottom) convertRegion(region->bottom);
+	if (region->top)    convertRegion(region->top);
+	if (region->btmid)  convertRegion(region->btmid);
 }
 
 void freeRegion(Region* region, bool left, bool lrmid, bool right, bool bottom, bool btmid, bool top) {
@@ -872,7 +876,7 @@ __stdcall SearchContext* create(const Point* points_begin, const Point* points_e
 	free(sc->gridsort);
 	free(sc->ranksort);
 
-	convertRegion(sc->root, true, true, true, true, true, true);
+	convertRegion(sc->root);
 
 	return (SearchContext*)sc;
 }
