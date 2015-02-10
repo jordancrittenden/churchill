@@ -5,7 +5,7 @@
 #include "gumption.h"
 #include "iqsort.h"
 
-// #define DEBUG 0
+// #define DEBUG
 #define WRITEFILES 0
 
 #ifdef DEBUG
@@ -15,17 +15,21 @@
 #endif
 
 // rank search parameters
-#define BASELIMIT 15000
+#define BASELIMIT 100000
 
 // region search parameters
 #define MAXDEPTH 9
-#define MAXLEAF 100000
+#define REGIONTHRESH 0.00011f
+#define MAXLEAF 50000
 #define NODESIZE 500
-#define LEAFSIZE 500
+#define LEAFSIZE 600
 
 // grid search parameters
-#define DIVS 150
-#define GRIDFACTOR 0.75f
+#define DIVS 175
+#define GRIDFACTOR 1.0f
+#define LINTHRESH1 1500
+#define LINTHRESH2 1500
+#define LINTHRESH3 5000
 #define RANKMAX 100000000
 
 // DEBUGGING --------------------------------------------------------------------------------------
@@ -43,20 +47,6 @@ void printPoints(Point* points, int n) {
 
 
 // SORT ROUTINES ----------------------------------------------------------------------------------
-
-inline int xcomp(const void* a, const void* b) {
-	float diff = ((Point*)a)->x - ((Point*)b)->x;
-	return diff > 0 ? 1 : diff < 0 ? -1 : 0;
-}
-
-inline int ycomp(const void* a, const void* b) {
-	float diff = ((Point*)a)->y - ((Point*)b)->y;
-	return diff > 0 ? 1 : diff < 0 ? -1 : 0;
-}
-
-inline int rankcomp(const void* a, const void* b) {
-	return ((Point*)a)->rank - ((Point*)b)->rank;
-}
 
 void xsort(struct Point *arr, unsigned n) {
 	#define point_x_lt(a,b) ((a)->x < (b)->x)
@@ -149,25 +139,6 @@ int bsearchy(Point p[], bool minOrMax, float v, int imin, int imax) {
 	return minOrMax ? imin : imax;
 }
 
-int bvalsearch(float p[], bool minOrMax, float v, int imin, int imax) {
-	while (imax >= imin) {
-		int imid = (imin + imax) / 2;
-		float val = p[imid];
-		if (val == v) {
-			if (minOrMax) {
-				while (imid > imin && p[imid-1] == v) imid--;
-				return imid;
-			} else {
-				while (imid < imax && p[imid+1] == v) imid++;
-				return imid;
-			}
-		}
-		else if (val < v) imin = imid + 1;
-		else imax = imid - 1;
-	}
-	return minOrMax ? imin : imax;
-}
-
 int32_t findHitsU(Rect* rect, Point* in, int n, Point* out, int count, bool (*hitcheck)(Rect* r, Point* p)) {
 	int i = 0;
 	int hits = 0;
@@ -247,7 +218,7 @@ int32_t findHitsS(const Rect* rect, Point* in, int n, Point* out, int count) {
 	return k;
 }
 
-int32_t findHitsB(GumpSearchContext* sc, Rect* rect, int b, Point** blocks, int* blocki, int* blockn, Point* out, int count) {
+int32_t findHitsB(Rect* rect, int b, Point** blocks, int* blocki, int* blockn, Point* out, int count) {
 	int32_t k = 0;
 	int minrank = RANKMAX;
 	int prank = -1;
@@ -259,12 +230,12 @@ int32_t findHitsB(GumpSearchContext* sc, Rect* rect, int b, Point** blocks, int*
 
 		// find min rank
 		for (int i = 0; i < b; i++) {
-			if (sc->blocki[i] >= sc->blockn[i]) { fin++; continue; }
+			if (blocki[i] >= blockn[i]) { fin++; continue; }
 
-			Point p = sc->blocks[i][sc->blocki[i]];
+			Point p = blocks[i][blocki[i]];
 			if (p.rank == prank) {
-				sc->blocki[i]++;
-				p = sc->blocks[i][sc->blocki[i]];
+				blocki[i]++;
+				p = blocks[i][blocki[i]];
 			}
 			if (p.rank < minrank) {
 				minb = i;
@@ -275,13 +246,13 @@ int32_t findHitsB(GumpSearchContext* sc, Rect* rect, int b, Point** blocks, int*
 		// If we've hit the end of all blocks, exit
 		if (fin == b) break;
 
-		Point bestp = sc->blocks[minb][sc->blocki[minb]];
+		Point bestp = blocks[minb][blocki[minb]];
 		if (isHit(rect, &bestp)) {
 			out[k] = bestp;
 			prank = bestp.rank;
 			k++;
 		}
-		sc->blocki[minb]++;
+		blocki[minb]++;
 	}
 
 	return k;
@@ -310,53 +281,85 @@ int32_t searchBinary(GumpSearchContext* sc, const Rect rect, const int32_t count
 }
 
 
-int32_t regionHits(GumpSearchContext* sc, Rect rect, Region* region, int count, Point* out_points, int depth) {
+int32_t regionHits(GumpSearchContext* sc, Rect rect, Region* region, int count, Point* out_points) {
 	if (region->n == 0) return 0;
 
 	// if this is a leaf, check it
 	if (region->left == NULL) {
 		int hits = findHitsS((Rect*)&rect, region->ranksort, region->n, out_points, count);
-		if (hits < count) return -depth;
+		if (hits < count) return -1;
 		return hits;
 	}
 
 	// look for a child that fully contains this rect
-	if (isRectInside(region->left->rect,   &rect)) return regionHits(sc, rect, region->left,   count, out_points, depth+1);
-	if (isRectInside(region->right->rect,  &rect)) return regionHits(sc, rect, region->right,  count, out_points, depth+1);
-	if (isRectInside(region->bottom->rect, &rect)) return regionHits(sc, rect, region->bottom, count, out_points, depth+1);
-	if (isRectInside(region->top->rect,    &rect)) return regionHits(sc, rect, region->top,    count, out_points, depth+1);
-	if (isRectInside(region->lrmid->rect,  &rect)) return regionHits(sc, rect, region->lrmid,  count, out_points, depth+1);
-	if (isRectInside(region->btmid->rect,  &rect)) return regionHits(sc, rect, region->btmid,  count, out_points, depth+1);
+	if (sc->w < region->subw) {
+		if (isRectInside(region->left->rect,   &rect)) return regionHits(sc, rect, region->left,   count, out_points);
+		if (isRectInside(region->right->rect,  &rect)) return regionHits(sc, rect, region->right,  count, out_points);
+		if (isRectInside(region->lrmid->rect,  &rect)) return regionHits(sc, rect, region->lrmid,  count, out_points);
+	}
+	if (sc->h < region->subh) {
+		if (isRectInside(region->bottom->rect, &rect)) return regionHits(sc, rect, region->bottom, count, out_points);
+		if (isRectInside(region->top->rect,    &rect)) return regionHits(sc, rect, region->top,    count, out_points);
+		if (isRectInside(region->btmid->rect,  &rect)) return regionHits(sc, rect, region->btmid,  count, out_points);
+	}
 
 	// if not fully contained in any children, check self
 	int hits = findHitsS((Rect*)&rect, region->ranksort, region->n, out_points, count);
-	if (hits < count) return -depth;
+	if (hits < count) return -1;
 	return hits;
 }
 
 int ngrid = 0, nbin = 0;
 int32_t searchGumption(GumpSearchContext* sc, Rect rect, const int32_t count, Point* out_points) {
-	sc->trim->lx = rect.lx; sc->trim->hx = rect.hx;
-	sc->trim->ly = rect.ly; sc->trim->hy = rect.hy;
-	if (sc->trim->lx < sc->bounds->lx) sc->trim->lx = sc->bounds->lx;
-	if (sc->trim->hx > sc->bounds->hx) sc->trim->hx = sc->bounds->hx;
-	if (sc->trim->ly < sc->bounds->ly) sc->trim->ly = sc->bounds->ly;
-	if (sc->trim->hy > sc->bounds->hy) sc->trim->hy = sc->bounds->hy;
+	sc->trim->lx = (rect.lx < sc->bounds->lx) ? sc->bounds->lx : rect.lx;
+	sc->trim->hx = (rect.hx > sc->bounds->hx) ? sc->bounds->hx : rect.hx;
+	sc->trim->ly = (rect.ly < sc->bounds->ly) ? sc->bounds->ly : rect.ly;
+	sc->trim->hy = (rect.hy > sc->bounds->hy) ? sc->bounds->hy : rect.hy;
 
-	// run region search
-	int hits = regionHits(sc, *sc->trim, sc->root, count, out_points, 1);
-	if (hits > 0) return hits;
+	sc->w = sc->trim->hx - sc->trim->lx;
+	sc->h = sc->trim->hy - sc->trim->ly;
+	float apct = (sc->w * sc->h) / sc->area;
+
+	int hits = 0;
+	// Don't run region search if likely to fail
+	if (apct > REGIONTHRESH) {
+		hits = regionHits(sc, *sc->trim, sc->root, count, out_points);
+		if (hits > 0) return hits;
+	}
 
 	// if region search fails, fall back on grid or binary
-	int xidxl = bsearchx(sc->xsort, true, rect.lx, 0, sc->N);
-	int xidxr = bsearchx(sc->xsort, false, rect.hx, 0, sc->N);
-	int nx = xidxr - xidxl + 1;
-	if (nx == 0) return 0;
+	int xidxl, xidxr, yidxl, yidxr, nx, ny;
 
-	int yidxl = bsearchy(sc->ysort, true, rect.ly, 0, sc->N);
-	int yidxr = bsearchy(sc->ysort, false, rect.hy, 0, sc->N);
-	int ny = yidxr - yidxl + 1;
-	if (ny == 0) return 0;
+	// if valid x range is likely to be smaller than y range, check it first
+	if (sc->w / sc->dx < sc->h / sc->dy) {
+		xidxl = bsearchx(sc->xsort, true, rect.lx, 0, sc->N);
+		xidxr = bsearchx(sc->xsort, false, rect.hx, 0, sc->N);
+		nx = xidxr - xidxl + 1;
+		if (nx == 0) return 0;
+
+		if (nx < LINTHRESH1) return findHitsU((Rect*)&rect, &sc->xsort[xidxl], nx, out_points, count, isHitY);
+
+		yidxl = bsearchy(sc->ysort, true, rect.ly, 0, sc->N);
+		yidxr = bsearchy(sc->ysort, false, rect.hy, 0, sc->N);
+		ny = yidxr - yidxl + 1;
+		if (ny == 0) return 0;
+
+		if (ny < LINTHRESH2) return findHitsU((Rect*)&rect, &sc->ysort[yidxl], ny, out_points, count, isHitX);
+	} else {
+		yidxl = bsearchy(sc->ysort, true, rect.ly, 0, sc->N);
+		yidxr = bsearchy(sc->ysort, false, rect.hy, 0, sc->N);
+		ny = yidxr - yidxl + 1;
+		if (ny == 0) return 0;
+
+		if (ny < LINTHRESH1) return findHitsU((Rect*)&rect, &sc->ysort[yidxl], ny, out_points, count, isHitX);
+
+		xidxl = bsearchx(sc->xsort, true, rect.lx, 0, sc->N);
+		xidxr = bsearchx(sc->xsort, false, rect.hx, 0, sc->N);
+		nx = xidxr - xidxl + 1;
+		if (nx == 0) return 0;
+
+		if (nx < LINTHRESH2) return findHitsU((Rect*)&rect, &sc->xsort[xidxl], nx, out_points, count, isHitY);
+	}
 
 	// find grid block for the bottom left and top right corners of the query rect
 	// subtract FLT_MIN to handle cases where bottom left is on a bottom or left grid boundary
@@ -391,16 +394,14 @@ int32_t searchGumption(GumpSearchContext* sc, Rect rect, const int32_t count, Po
 
 	if (blocks == 0) return 0;
 
-	if ((float)maxtests * GRIDFACTOR < (float)(nx < ny ? nx : ny)) {
-		if (blocks == 1) hits = findHitsS((Rect*)&rect, sc->blocks[0], sc->blockn[0], out_points, count);
-		else hits = findHitsB(sc, (Rect*)&rect, blocks, sc->blocks, sc->blocki, sc->blockn, out_points, count);
+	int nsmall = (float)(nx < ny ? nx : ny);
+	if (nsmall > LINTHRESH3 && (float)maxtests * GRIDFACTOR < nsmall) {
+		if (blocks == 1) return findHitsS((Rect*)&rect, sc->blocks[0], sc->blockn[0], out_points, count);
+		else return findHitsB((Rect*)&rect, blocks, sc->blocks, sc->blocki, sc->blockn, out_points, count);
 	} else {
-		if (nx < ny) hits = findHitsU((Rect*)&rect, &sc->xsort[xidxl], nx, out_points, count, isHitY);
-		else hits = findHitsU((Rect*)&rect, &sc->ysort[yidxl], ny, out_points, count, isHitX);
+		if (nx < ny) return findHitsU((Rect*)&rect, &sc->xsort[xidxl], nx, out_points, count, isHitY);
+		else return findHitsU((Rect*)&rect, &sc->ysort[yidxl], ny, out_points, count, isHitX);
 	}
-
-
-	return hits;
 }
 
 
@@ -413,6 +414,8 @@ Region* buildRegion(GumpSearchContext* sc, Rect* rect, Region* lover, Region* lr
 	regions++;
 	Region* region = (Region*)malloc(sizeof(Region));
 	region->rect     = rect;
+	region->subw     = (rect->hx - rect->lx) / 2;
+	region->subh     = (rect->hy - rect->ly) / 2;
 	region->crect    = NULL;
 	region->left     = NULL;
 	region->right    = NULL;
@@ -422,11 +425,7 @@ Region* buildRegion(GumpSearchContext* sc, Rect* rect, Region* lover, Region* lr
 	region->btmid    = NULL;
 	region->ranksort = NULL;
 
-	int est = MAXLEAF;
-	int blocks = -1;
-
-	// only compute point count estimate if deep in tree
-	if (depth >= 8) {
+	if (depth == MAXDEPTH) {
 		double di = (double)(rect->lx - sc->bounds->lx) / sc->dx;
 		double dj = (double)(rect->ly - sc->bounds->ly) / sc->dy;
 		double dp = (double)(rect->hx - sc->bounds->lx) / sc->dx;
@@ -441,32 +440,26 @@ Region* buildRegion(GumpSearchContext* sc, Rect* rect, Region* lover, Region* lr
 		if (rect->lx < sc->grect[i][j].lx) i--;
 		if (rect->ly < sc->grect[i][j].ly) j--;
 
-		blocks = 0;
+		int blocks = 0;
+		int est = 0;
 		for (int a = 0; a < w; a++) {
 			for (int b = 0; b < h; b++) {
 				int dlen = sc->dlen[a+i][b+j];
 				if (dlen == 0) continue;
 				if (!isRectOverlap(rect, &sc->drect[a+i][b+j])) continue;
-				int p = rectOverlapPercent(&sc->drect[a+i][b+j], rect) * dlen;
-				est += p;
-
+				est += dlen;
 				sc->blocks[blocks] = sc->grid[a+i][b+j];
 				sc->blocki[blocks] = 0;
 				sc->blockn[blocks] = dlen;
 				blocks++;
 			}
 		}
+
+		region->ranksort = (Point*)calloc(LEAFSIZE, sizeof(Point));
+		if (blocks == 1) region->n = findHitsS(rect, sc->blocks[0], sc->blockn[0], region->ranksort, LEAFSIZE);
+		else region->n = findHitsB(rect, blocks, sc->blocks, sc->blocki, sc->blockn, region->ranksort, LEAFSIZE);
+		return region;
 	}
-
-	bool isleaf = est < MAXLEAF || depth == MAXDEPTH;
-	int len = isleaf ? LEAFSIZE : NODESIZE;
-	region->ranksort = (Point*)calloc(len, sizeof(Point));
-	if (blocks > 0) {
-		if (blocks == 1) region->n = findHitsS(rect, sc->blocks[0], sc->blockn[0], region->ranksort, len);
-		else region->n = findHitsB(sc, rect, blocks, sc->blocks, sc->blocki, sc->blockn, region->ranksort, len);
-	} else region->n = searchBinary(sc, *rect, len, region->ranksort);
-
-	if (isleaf) return region;
 
 	// build child regions
 	float xmid = (rect->lx + rect->hx) / 2;
@@ -488,6 +481,15 @@ Region* buildRegion(GumpSearchContext* sc, Rect* rect, Region* lover, Region* lr
 	region->bottom = bover  ? bover  : buildRegion(sc, &region->crect[3], region->left->bottom, region->lrmid->bottom, region->right->bottom, NULL, NULL, NULL, depth+1);
 	region->top    = tover  ? tover  : buildRegion(sc, &region->crect[4], region->left->top, region->lrmid->top, region->right->top, NULL, NULL, NULL, depth+1);
 	region->btmid  = btover ? btover : buildRegion(sc, &region->crect[5], region->left->btmid, region->lrmid->btmid, region->right->btmid, region->bottom->top, NULL, region->top->bottom, depth+1);
+
+	region->ranksort = (Point*)calloc(NODESIZE, sizeof(Point));
+	sc->blocks[0] = region->left->ranksort; sc->blocki[0] = 0; sc->blockn[0] = region->left->n;
+	sc->blocks[1] = region->right->ranksort; sc->blocki[1] = 0; sc->blockn[1] = region->right->n;
+	sc->blocks[2] = region->lrmid->ranksort; sc->blocki[2] = 0; sc->blockn[2] = region->lrmid->n;
+	sc->blocks[3] = region->bottom->ranksort; sc->blocki[3] = 0; sc->blockn[3] = region->bottom->n;
+	sc->blocks[4] = region->top->ranksort; sc->blocki[4] = 0; sc->blockn[4] = region->top->n;
+	sc->blocks[5] = region->btmid->ranksort; sc->blocki[5] = 0; sc->blockn[5] = region->btmid->n;
+	region->n = findHitsB(rect, 6, sc->blocks, sc->blocki, sc->blockn, region->ranksort, NODESIZE);
 
 	return region;
 }
@@ -633,16 +635,6 @@ __stdcall SearchContext* create(const Point* points_begin, const Point* points_e
 	DPRINT(("Building region tree\n"));
 	sc->root = buildRegion(sc, sc->bounds, NULL, NULL, NULL, NULL, NULL, NULL, 1);
 
-	if (WRITEFILES) {
-		DPRINT(("Writing points file\n"));
-		FILE *f = fopen("points.csv", "w");
-		for (int i = 0; i < sc->N; i++) {
-			fprintf(f, "%d,%f,%f\n", sc->gridsort[i].rank, sc->gridsort[i].x, sc->gridsort[i].y);
-		}
-		fclose(f);
-		remove("rects.csv");
-	}
-
 	free(sc->gridsort);
 	free(sc->ranksort);
 
@@ -652,10 +644,7 @@ __stdcall SearchContext* create(const Point* points_begin, const Point* points_e
 __stdcall int32_t search(SearchContext* sc, Rect rect, const int32_t count, Point* out_points) {
 	GumpSearchContext* context = (GumpSearchContext*)sc;
 	if (context->N == 0) return 0;
-	int hits = searchGumption(context, rect, count, out_points);
-	// printRect(rect);
-	// printPoints(out_points, hits);
-	return hits;
+	return searchGumption(context, rect, count, out_points);
 }
 
 __stdcall SearchContext* destroy(SearchContext* sc) {

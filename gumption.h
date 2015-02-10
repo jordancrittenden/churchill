@@ -21,6 +21,8 @@ struct Region {
 	Region* bottom;
 	Region* top;
 	Region* btmid;
+
+	float subw, subh;
 };
 
 struct GumpSearchContext {
@@ -44,9 +46,13 @@ struct GumpSearchContext {
 	Rect* bounds;
 	double area;
 	double dx, dy;
+
+	// Current search
 	Point** blocks;
 	int* blocki;
 	int* blockn;
+	float w;
+	float h;
 };
 
 SearchContext* __stdcall DLL_API create(const Point* points_begin, const Point* points_end);
