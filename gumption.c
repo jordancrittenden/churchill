@@ -6,21 +6,16 @@
 #include "iqsort.h"
 
 // #define DEBUG
-#define WRITEFILES 0
-
 #ifdef DEBUG
 	#define DPRINT(x) printf x
 #else
 	#define DPRINT(x) do {} while (0)
 #endif
 
-// rank search parameters
-#define BASELIMIT 100000
-
 // region search parameters
 #define MAXDEPTH 9
 #define REGIONTHRESH 0.00011f
-#define MAXLEAF 50000
+#define MAXLEAF 75000
 #define NODESIZE 500
 #define LEAFSIZE 600
 
@@ -81,7 +76,7 @@ inline bool isRectOverlap(Rect* r1, Rect* r2) {
 	return r1->lx <= r2->hx && r1->hx >= r2->lx && r1->ly <= r2->hy && r1->hy >= r2->ly;
 }
 
-inline bool rectOverlapPercent(Rect* r1, Rect* r2) {
+inline float rectOverlapPercent(Rect* r1, Rect* r2) {
 	float lx = r1->lx > r2->lx ? r1->lx : r2->lx;
 	float hx = r1->hx < r2->hx ? r1->hx : r2->hx;
 	float ly = r1->ly > r2->ly ? r1->ly : r2->ly;
@@ -262,25 +257,6 @@ int32_t findHitsB(Rect* rect, int b, Point** blocks, int* blocki, int* blockn, P
 
 // SEARCH IMPLEMENTATIONS -------------------------------------------------------------------------
 
-// binary search - narrow search to points in x range, y range, and check smaller set
-int32_t searchBinary(GumpSearchContext* sc, const Rect rect, const int32_t count, Point* out_points) {
-	int xidxl = bsearchx(sc->xsort, true, rect.lx, 0, sc->N);
-	int xidxr = bsearchx(sc->xsort, false, rect.hx, 0, sc->N);
-	int nx = xidxr - xidxl + 1;
-	if (nx == 0) return 0;
-
-	int yidxl = bsearchy(sc->ysort, true, rect.ly, 0, sc->N);
-	int yidxr = bsearchy(sc->ysort, false, rect.hy, 0, sc->N);
-	int ny = yidxr - yidxl + 1;
-	if (ny == 0) return 0;
-
-	if ((nx < ny ? nx : ny) > BASELIMIT) return findHitsS((Rect*)&rect, sc->ranksort, sc->N, out_points, count);
-
-	if (nx < ny) return findHitsU((Rect*)&rect, &sc->xsort[xidxl], nx, out_points, count, isHitY);
-	else return findHitsU((Rect*)&rect, &sc->ysort[yidxl], ny, out_points, count, isHitX);
-}
-
-
 int32_t regionHits(GumpSearchContext* sc, Rect rect, Region* region, int count, Point* out_points) {
 	if (region->n == 0) return 0;
 
@@ -425,7 +401,7 @@ Region* buildRegion(GumpSearchContext* sc, Rect* rect, Region* lover, Region* lr
 	region->btmid    = NULL;
 	region->ranksort = NULL;
 
-	if (depth == MAXDEPTH) {
+	if (depth == MAXDEPTH || depth == MAXDEPTH + 1) {
 		double di = (double)(rect->lx - sc->bounds->lx) / sc->dx;
 		double dj = (double)(rect->ly - sc->bounds->ly) / sc->dy;
 		double dp = (double)(rect->hx - sc->bounds->lx) / sc->dx;
@@ -447,7 +423,7 @@ Region* buildRegion(GumpSearchContext* sc, Rect* rect, Region* lover, Region* lr
 				int dlen = sc->dlen[a+i][b+j];
 				if (dlen == 0) continue;
 				if (!isRectOverlap(rect, &sc->drect[a+i][b+j])) continue;
-				est += dlen;
+				est += rectOverlapPercent(&sc->drect[a+i][b+j], rect) * dlen;
 				sc->blocks[blocks] = sc->grid[a+i][b+j];
 				sc->blocki[blocks] = 0;
 				sc->blockn[blocks] = dlen;
@@ -455,10 +431,13 @@ Region* buildRegion(GumpSearchContext* sc, Rect* rect, Region* lover, Region* lr
 			}
 		}
 
-		region->ranksort = (Point*)calloc(LEAFSIZE, sizeof(Point));
-		if (blocks == 1) region->n = findHitsS(rect, sc->blocks[0], sc->blockn[0], region->ranksort, LEAFSIZE);
-		else region->n = findHitsB(rect, blocks, sc->blocks, sc->blocki, sc->blockn, region->ranksort, LEAFSIZE);
-		return region;
+		// allow MAXDEPTH constraint to be overridden for regions with tons of points
+		if (est < MAXLEAF || depth == MAXDEPTH + 1) {
+			region->ranksort = (Point*)calloc(LEAFSIZE, sizeof(Point));
+			if (blocks == 1) region->n = findHitsS(rect, sc->blocks[0], sc->blockn[0], region->ranksort, LEAFSIZE);
+			else region->n = findHitsB(rect, blocks, sc->blocks, sc->blocki, sc->blockn, region->ranksort, LEAFSIZE);
+			return region;
+		}
 	}
 
 	// build child regions
