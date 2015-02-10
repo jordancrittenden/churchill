@@ -400,3 +400,93 @@ struct GumpSearchContext {
 	int treeximin, treeximax;
 	int treeyimin, treeyimax;
 };
+
+
+
+
+int32_t findHitsBV(GumpSearchContext* sc, Rect* rect, int b, Point* out, int count) {
+	int32_t k = 0;
+	int minrank = RANKMAX;
+	int prank = -1;
+	int minb = -1;
+	int fin = 0;
+	while (k < count) {
+		minrank = RANKMAX;
+		fin = 0;
+
+		// find min rank
+		for (int i = 0; i < b; i++) {
+			// ops += 1;
+			Points* p = sc->blockpoints[i];
+			if (sc->blocki[i] >= p->n) { fin++; continue; }
+
+			// ops += 1;
+			int rank = p->rank[sc->blocki[i]];
+			if (rank < minrank) {
+				if (rank == prank) {
+					sc->blocki[i]++;
+					rank = p->rank[sc->blocki[i]];
+					if (rank < minrank) {
+						minb = i;
+						minrank = rank;
+					}
+				} else {
+					minb = i;
+					minrank = rank;
+				}
+			}
+		}
+
+		// If we've hit the end of all blocks, exit
+		if (fin == b) break;
+
+		Points* bestp = sc->blockpoints[minb];
+		int pos = sc->blocki[minb];
+		// ops += 4;
+		if (bestp->x[pos] >= rect->lx && bestp->x[pos] <= rect->hx && bestp->y[pos] >= rect->ly && bestp->y[pos] <= rect->hy) {
+			out[k].id = bestp->id[pos];
+			out[k].rank = bestp->rank[pos];
+			prank = bestp->rank[pos];
+			k++;
+		}
+		sc->blocki[minb]++;
+	}
+
+	return k;
+}
+
+
+
+inline int xcomp(const void* a, const void* b) {
+	float diff = ((Point*)a)->x - ((Point*)b)->x;
+	return diff > 0 ? 1 : diff < 0 ? -1 : 0;
+}
+
+inline int ycomp(const void* a, const void* b) {
+	float diff = ((Point*)a)->y - ((Point*)b)->y;
+	return diff > 0 ? 1 : diff < 0 ? -1 : 0;
+}
+
+inline int rankcomp(const void* a, const void* b) {
+	return ((Point*)a)->rank - ((Point*)b)->rank;
+}
+
+
+
+
+void convertGrid(GumpSearchContext* sc) {
+	DPRINT(("Freeing grid tree\n"));
+	sc->gridpoints = (Points***)calloc(DIVS, sizeof(Points**));
+	for (int i = 0; i < DIVS; i++) {
+		sc->gridpoints[i] = (Points**)calloc(DIVS, sizeof(Points*));
+		for (int j = 0; j < DIVS; j++) {
+			sc->gridpoints[i][j] = buildPoints(sc->dlen[i][j]);
+			fillPoints(sc->gridpoints[i][j], sc->grid[i][j], sc->dlen[i][j]);
+			free(sc->grid[i][j]);
+		}
+		free(sc->grid[i]);
+		free(sc->dlen[i]);
+	}
+	free(sc->grid);
+	free(sc->dlen);
+}
