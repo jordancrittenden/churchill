@@ -52,7 +52,7 @@ struct GumpSearchContext {
 	// Grid search
 	Point* gridsort;
 	Point*** grid;
-	Points** gridpoints;
+	Points*** gridpoints;
 	Rect** grect;
 	Rect** drect;
 	int** dlen;
@@ -62,6 +62,7 @@ struct GumpSearchContext {
 
 	// Current search
 	Point** blocks;
+	Points** blockpoints;
 	int* blocki;
 	int* blockn;
 	float w;
