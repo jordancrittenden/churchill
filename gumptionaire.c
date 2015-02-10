@@ -21,7 +21,7 @@
 #define REGIONTHRESH 0.00011f
 #define BLOCKCHECK 5
 #define MAXDEPTH 10
-#define MAXLEAF 200000
+#define MAXLEAF 150000
 #define NODESIZE 500
 #define LEAFSIZE 600
 
@@ -606,7 +606,7 @@ Region* buildRegion(GumpSearchContext* sc, Rect* rect, Region* lover, Region* lr
 		}
 	}
 
-	bool isleaf = (depth == 9 && est < 125000) || depth == 10;
+	bool isleaf = (depth == 9 && est < MAXLEAF) || depth == 10;
 	int len = isleaf ? LEAFSIZE : NODESIZE;
 	region->ranksort = (Point*)calloc(len, sizeof(Point));
 	if (blocks > 0) {
