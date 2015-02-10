@@ -14,8 +14,8 @@
 
 // region search parameters
 #define MAXDEPTH 9
-#define REGIONTHRESH 0.00011f
-#define MAXLEAF 75000
+#define REGIONTHRESH 0.0001f
+#define MAXLEAF 65000
 #define NODESIZE 500
 #define LEAFSIZE 600
 
@@ -24,7 +24,7 @@
 #define GRIDFACTOR 1.0f
 #define LINTHRESH1 1500
 #define LINTHRESH2 1500
-#define LINTHRESH3 5000
+#define LINTHRESH3 1000
 #define RANKMAX 100000000
 
 // DEBUGGING --------------------------------------------------------------------------------------
@@ -260,8 +260,8 @@ int32_t findHitsB(Rect* rect, int b, Point** blocks, int* blocki, int* blockn, P
 int32_t regionHits(GumpSearchContext* sc, Rect rect, Region* region, int count, Point* out_points) {
 	if (region->n == 0) return 0;
 
-	// if this is a leaf, check it
-	if (region->left == NULL) {
+	// if this is a leaf, or all points are in this node's ranksort, check it
+	if (region->left == NULL || region->n < NODESIZE) {
 		int hits = findHitsS((Rect*)&rect, region->ranksort, region->n, out_points, count);
 		if (hits < count) return -1;
 		return hits;
@@ -338,7 +338,6 @@ int32_t searchGumption(GumpSearchContext* sc, Rect rect, const int32_t count, Po
 	}
 
 	// find grid block for the bottom left and top right corners of the query rect
-	// subtract FLT_MIN to handle cases where bottom left is on a bottom or left grid boundary
 	double di = (double)(sc->trim->lx - sc->bounds->lx) / sc->dx;
 	double dj = (double)(sc->trim->ly - sc->bounds->ly) / sc->dy;
 	double dp = (double)(sc->trim->hx - sc->bounds->lx) / sc->dx;
